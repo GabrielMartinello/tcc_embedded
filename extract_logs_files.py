@@ -1,4 +1,5 @@
 import os
+import subprocess
 
 BASE_PATH = './data/logs'
 
@@ -10,34 +11,45 @@ BASE_PATH = './data/logs'
 #Função pra deszipar 
 def unzip_log_files(zip_file):
     filepath = zip_file[:-4]
-    os.system(f'7z e {zip_file} -o{filepath} *.logjez -r')
 
-    # Remove unnecessary files
-    os.system(f'rm {zip_file}')  # Zip file
+    if not os.path.exists(filepath):
+        os.makedirs(filepath)
+    
+    try:
+        print(f"Extraindo para: {filepath}")
+        cmd = f'7z e "{zip_file}" -o"{filepath}" *.jez -r -y >nul'
+        subprocess.run(cmd, shell=True, check=True)
+        print("Extração concluída!")
+    except subprocess.CalledProcessError as e:
+        print(f" Erro ao extrair: {e}")
 
-    # list all files in the directory
+    # Remove os arquivos zips pai
+    #os.system(f'del {zip_file}')  # Zip file
+
+    if not os.path.exists(filepath):
+        print(f"Diretório {filepath} não existe.")
+        return
+
+    # lista todos os arquivos do diretório
     files = os.listdir(filepath)
+    print('Files: ', files)
 
-    for file in files:
-        # extract .logjez files
-        # and rename to .csv
-        if file.endswith('.logjez'):
-            new_filename = file[:-7]
-            os.system(
-                f'7z e {filepath}/{file} -y -o{filepath}/{new_filename} \
-                > /dev/null'
-            )
-            os.system(
-                f'mv \
-                {filepath}/{new_filename}/logd.dat \
-                {filepath}/{new_filename}.csv'
-            )
-            os.system(
-                f'rm -r {filepath}/{new_filename}'
-            )
+    if files:
+        for file in files:
+            # extract .logjez files
+            # and rename to .csv
+            if file.endswith('.jez'):
+                new_filename = file[:-7]
+                #Deszipa o arquivo
+                os.system(f'7z e "{filepath}\\{file}" -y -o"{filepath}\\{new_filename}" > nul')
+                # Renomeia para .csv
+                os.system(f'move "{filepath}\\{new_filename}\\logd.dat" "{filepath}\\{new_filename}.csv"')
+                #remove arquivo antigo
+                os.remove(f"{filepath}\\{file}")
+                #remove diretório do arquivo
+                os.system(f'rmdir /s /q "{filepath}\\{new_filename}"')
 
-    os.system(f'chmod 777 -R {filepath}')
-    os.system(f'rm {filepath}/*.logjez')
+    #os.system(f'del {filepath}/*.logjez')
 
 
 if __name__ == "__main__":
