@@ -1,19 +1,17 @@
 import os
+import chardet
 import tqdm
 import time
 
 if __name__ == "__main__":
 
     BASE_LOGS_PATH = "./data/logs"
-    # lista todos os diretórios com base no caminho
     directories = os.listdir(BASE_LOGS_PATH)
-    #command = "touch {} && iconv -f ISO-8859-1 -t UTF-8//TRANSLIT {} > {} && rm {}"
-    #Comando utilizando powershell do Windows para fazer a codificação do arquivo
-    command = command = "powershell -Command \"New-Item -ItemType File -Path {} ; Get-Content {} | Out-File -Encoding UTF8 {} ; Remove-Item {}\""
-
+    
     tic = time.time()
+    
     for directory in directories:
-        path = BASE_LOGS_PATH + "/" + directory
+        path = os.path.join(BASE_LOGS_PATH, directory)
         if not os.path.isdir(path):
             continue
 
@@ -22,14 +20,27 @@ if __name__ == "__main__":
         print(f"Processando diretório {directory} com {len(files)} arquivos")
 
         for file in tqdm.tqdm(files):
-            # converte o encoding do arquivo
+            # Caminhos dos arquivos
+            path_old_file = os.path.join(path, file)
             filename = file.split(".")[0]
             new_filename = filename + "_new.csv"
-            
-            path_old_file = path + "/" + file
-            path_new_file = path + "/" + new_filename
+            path_new_file = os.path.join(path, new_filename)
 
-            os.system(command.format(path_new_file, path_old_file, path_new_file, path_old_file))
+            # Detecta a codificação do arquivo
+            with open(path_old_file, 'rb') as f:
+                result = chardet.detect(f.read())
+
+            encoding = result['encoding'] or 'ISO-8859-1'  # Fallback para 'ISO-8859-1'
+
+            # Converte o arquivo para UTF-8
+            try:
+                with open(path_old_file, 'r', encoding=encoding, errors='ignore') as src:
+                    with open(path_new_file, 'w', encoding='utf-8') as dst:
+                        dst.write(src.read())
+                os.remove(path_old_file)  # Remove o arquivo original (se necessário)
+            except Exception as e:
+                print(f"Erro ao converter {file}: {e}")
+
     toc = time.time()
 
     print(f"A conversão durou {toc - tic} segundos")
