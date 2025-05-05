@@ -38,11 +38,12 @@ VOTES_DESCRIPTIONS = [
 ]
 
 ACCEPTED_DATES = [
-    '2024-10-02', '2024-10-30', # Data constitucional da eleição
-    '2024-10-03', '2024-10-31', # No caso da seção 'virar a noite' e acabar depois da meia noite, imagino que sejam casos RARÍSSIMOS
+    '2024-10-27', '2024-11-29', # Data constitucional da eleição
+    '2024-10-28', '2024-11-30', # No caso da seção 'virar a noite' e acabar depois da meia noite, imagino que sejam casos RARÍSSIMOS
 ]
 
 ALL_FILTERS = METADATA + EVENTS_DESCRIPTIONS + VOTES_DESCRIPTIONS
+print('Filtros: ', ALL_FILTERS)
 
 csv_path = './ALL_UFS.csv'
 
@@ -51,13 +52,13 @@ query = F"""
         *
     FROM (
         SELECT
-            event_timestamp,
+            column0 as event_timestamp,
             event_timestamp::date AS event_date,
-            event_type,
-            some_id,
-            event_system,
-            event_description,
-            event_id,
+            column1 as event_type,
+            column2 as some_id,
+            column3 as event_system,
+            column4 as event_description,
+            column5 as event_id,
                 
             REPLACE(SPLIT_PART(filename, '/', 5), '_new.csv', '') AS filename,
             
@@ -73,7 +74,10 @@ query = F"""
     ) _
     WHERE 1=1
     AND event_date IN ({', '.join([F"'{date}'" for date in ACCEPTED_DATES])})
+    LIMIT 10
 """
+
+print('Query: ', query)
 
 if not os.path.exists(csv_path):
     raise FileNotFoundError(f'O arquivo {csv_path} não foi encontrado.')
@@ -81,6 +85,12 @@ if not os.path.exists(csv_path):
 con = duckdb.connect()
 
 result = con.execute(query).fetchdf()
+result2 = con.execute(f"""
+    SELECT 
+        T.column0 as event_timestamp
+    FROM read_csv_auto('{csv_path}') T
+    LIMIT 10
+""").fetchdf()
 
 # Mostra o resultado
 print(result)
