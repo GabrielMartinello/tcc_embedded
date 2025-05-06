@@ -59,14 +59,13 @@ query = F"""
             column3 as event_system,
             column4 as event_description,
             column5 as event_id,
-                
-            REPLACE(SPLIT_PART(filename, '/', 5), '_new.csv', '') AS filename,
+            REPLACE(SPLIT_PART(filename, '\\', 8), '_new.csv', '') AS filename,
             
             -- Metadata from filename
-            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '/', 5), '-', 2),  1, 5 ) AS city_code,
-            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '/', 5), '-', 2),  6, 4 ) AS zone_code,
-            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '/', 5), '-', 2), 10, 4 ) AS section_code,
-            REPLACE(SPLIT_PART(filename, '/', 4), '2_', '') AS uf
+            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1),  2, 5 ) AS city_code,
+            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1),  7, 4 ) AS zone_code,
+            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1), 11, 4 ) AS section_code,
+            REPLACE(SPLIT_PART(filename, '\\', 7), '2_', '') AS uf
         FROM
             read_csv_auto('{csv_path}')
         WHERE 1=1
@@ -74,7 +73,6 @@ query = F"""
     ) _
     WHERE 1=1
     AND event_date IN ({', '.join([F"'{date}'" for date in ACCEPTED_DATES])})
-    LIMIT 10
 """
 
 print('Query: ', query)
@@ -85,10 +83,11 @@ if not os.path.exists(csv_path):
 con = duckdb.connect()
 
 result = con.execute(query).fetchdf()
-result2 = con.execute(f"""
+
+queryTeste = con.execute(f"""
     SELECT 
-        T.column0 as event_timestamp
-    FROM read_csv_auto('{csv_path}') T
+        *
+    FROM read_csv_auto('{csv_path}') 
     LIMIT 10
 """).fetchdf()
 
