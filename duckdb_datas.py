@@ -1,6 +1,7 @@
 import duckdb
 import os
 import pandas as pd
+import time
 
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
@@ -60,7 +61,6 @@ query = F"""
             column4 as event_description,
             column5 as event_id,
             REPLACE(SPLIT_PART(filename, '\\', 8), '_new.csv', '') AS filename,
-            
             -- Metadata from filename
             SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1),  2, 5 ) AS city_code,
             SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1),  7, 4 ) AS zone_code,
@@ -81,8 +81,21 @@ if not os.path.exists(csv_path):
     raise FileNotFoundError(f'O arquivo {csv_path} não foi encontrado.')
 
 con = duckdb.connect()
-
+tic = time.time()
 result = con.execute(query).fetchdf()
+toc = time.time()
+
+print(F"A consulta demorou {toc - tic}s")
+
+print('Iniciando copy para arquivo .csv filtrado para votos')
+queryEvents = F"""
+        COPY ({query}) TO 'VOTOS_POR_UF.csv' (FORMAT CSV, HEADER);
+    """
+tic = time.time()
+con.execute(queryEvents)
+toc = time.time()
+
+print(F"Tempo para montar csv VOTOS_POR_UF {toc - tic}s")
 
 queryTeste = con.execute(f"""
     SELECT 
@@ -90,6 +103,3 @@ queryTeste = con.execute(f"""
     FROM read_csv_auto('{csv_path}') 
     LIMIT 10
 """).fetchdf()
-
-# Mostra o resultado
-print(result)
