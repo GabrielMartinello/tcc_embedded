@@ -1,12 +1,6 @@
 import duckdb
 import os
-import pandas as pd
 import time
-
-pd.set_option('display.max_rows', None)
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', 0)
-pd.set_option('display.max_colwidth', None)
 
 COLUMN_EVENT_DESCRIPTION = 'event_description'
 
@@ -73,6 +67,7 @@ query = F"""
     ) _
     WHERE 1=1
     AND event_date IN ({', '.join([F"'{date}'" for date in ACCEPTED_DATES])})
+    LIMIT 10
 """
 
 print('Query: ', query)
@@ -83,10 +78,13 @@ if not os.path.exists(csv_path):
 con = duckdb.connect()
 tic = time.time()
 result = con.execute(query).fetchdf()
+print(result)
 toc = time.time()
 
 print(F"A consulta demorou {toc - tic}s")
 
+#Para ficar em uma visualizacao melhor e nao ter que ficar fazendo esse sql
+#Movi para um arquivo .csv para ficar mais fácil de ver
 print('Iniciando copy para arquivo .csv filtrado para votos')
 queryEvents = F"""
         COPY ({query}) TO 'VOTOS_POR_UF.csv' (FORMAT CSV, HEADER);
