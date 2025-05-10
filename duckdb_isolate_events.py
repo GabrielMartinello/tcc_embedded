@@ -96,10 +96,3 @@ con.execute(queryEvents)
 toc = time.time()
 
 print(F"Tempo para montar csv VOTOS_POR_UF {toc - tic}s")
-
-queryTeste = con.execute(f"""
-    SELECT 
-        *
-    FROM read_csv_auto('{csv_path}') 
-    LIMIT 10
-""").fetchdf()
