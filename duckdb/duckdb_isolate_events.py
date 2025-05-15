@@ -19,15 +19,15 @@ EVENTS_DESCRIPTIONS = [
 
 VOTES_DESCRIPTIONS = [
     # VOTOS
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Aguardando digitação do título'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Título digitado pelo mesário'",
+    F"{COLUMN_EVENT_DESCRIPTION} = 'Aguardando digitação do identificador do eleitor'",
+    F"{COLUMN_EVENT_DESCRIPTION} = 'Identificador do eleitor digitado pelo mesário'",
     F"{COLUMN_EVENT_DESCRIPTION} = 'Eleitor foi habilitado'",
     F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Voto confirmado par%'",
     F"{COLUMN_EVENT_DESCRIPTION} = 'O voto do eleitor foi computado'",
     
     # BIOMETRIA
     F"{COLUMN_EVENT_DESCRIPTION} ILIKE '%Digital%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Dedo reconhecido%' ",
+    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Tipo de habilitação do eleitor [biométrica]%' ",
     F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Solicita digital%' ",
     F"{COLUMN_EVENT_DESCRIPTION} = 'Solicitação de dado pessoal do eleitor para habilitação manual' ",
 ]
@@ -67,7 +67,6 @@ query = F"""
     ) _
     WHERE 1=1
     AND event_date IN ({', '.join([F"'{date}'" for date in ACCEPTED_DATES])})
-    LIMIT 10
 """
 
 print('Query: ', query)
