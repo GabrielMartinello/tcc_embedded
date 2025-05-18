@@ -1,80 +1,89 @@
 import os
 import csv
-import monetdblite
+import glob
 import time
+import monetdblite
 
-STATES = [
-    'AC', 'AL', 'AP', 'AM',
-    'BA', 'CE', 'ES', 'GO',
-    'MA', 'MT', 'MS', 'MG',
-    'PA', 'PB', 'PR', 'PE',
-    'PI', 'RJ', 'RN', 'RS',
-    'RO', 'RR', 'SC', 'SP',
-    'SE', 'TO'
-]
+DB_PATH = './events_monet'
+DATA_PATH = '../data/logs'
 
-# Inicializa ou conecta ao banco de dados
-inicio = time.perf_counter()
-monetdblite.init('./events_monet')
-conn = monetdblite.connect()
-
-# Tenta criar a tabela (MonetDBLite não suporta IF NOT EXISTS)
-try:
-    monetdblite.sql(
-        'CREATE TABLE events ('
-        '"event_timestamp" VARCHAR(50), '
-        '"event_type" VARCHAR(100), '
-        '"some_id" VARCHAR(50), '
-        '"event_system" VARCHAR(100), '
-        '"event_description" VARCHAR(1000), '
-        '"event_id" VARCHAR(50), '
-        '"filename" VARCHAR(255)'
-        ');',
-        client=conn
-    )
-    print("Tabela 'events' criada com sucesso.")
-except monetdblite.exceptions.DatabaseError as e:
-    if "name 'events' already in use" in str(e):
-        print("Tabela 'events' já existe. Prosseguindo...")
-    else:
-        raise
-
-def escape(value):
-    return value.replace("'", "''")  # Escapa aspas simples para SQL seguro
-
-def insert_row(row):
-    sql = f"""
-        INSERT INTO events VALUES (
-            '{escape(row[0])}',
-            '{escape(row[1])}',
-            '{escape(row[2])}',
-            '{escape(row[3])}',
-            '{escape(row[4])}',
-            '{escape(row[5])}',
-            '{escape(row[6])}'
-        );
-    """
+def create_table_if_needed(conn):
+    try:
+        monetdblite.sql('''
+            CREATE TABLE events (
+                event_timestamp VARCHAR(50),
+                event_type VARCHAR(100),
+                some_id VARCHAR(50),
+                event_system VARCHAR(100),
+                event_description VARCHAR(1000),
+                event_id VARCHAR(50),
+                filename VARCHAR(255)
+            );
+        ''', client=conn)
+        print("Tabela 'events' criada com sucesso.")
+    except monetdblite.exceptions.DatabaseError as e:
+        if "name 'events' already in use" in str(e):
+            print("Tabela 'events' já existe. Prosseguindo...")
+        else:
+            raise
+# Criei para agrupar linhas e executar várias de uma vez só (muito mais rápido).
+# Se for fazer do jeito tradicional, que é um insert por linha fica muito lento no monetdblite
+# Com batch, você acumula várias linhas em memória, depois gera um único INSERT com várias linhas
+# Reduzindo o número de instruções SQL enviadas
+def insert_batch(conn, rows):
+    if not rows:
+        return
+    values = ",\n".join([
+        "('{}', '{}', '{}', '{}', '{}', '{}', '{}')".format(
+            r[0].replace("'", "''"),
+            r[1].replace("'", "''"),
+            r[2].replace("'", "''"),
+            r[3].replace("'", "''"),
+            r[4].replace("'", "''"),
+            r[5].replace("'", "''"),
+            r[6].replace("'", "''")
+        )
+        for r in rows
+    ])
+    sql = f"INSERT INTO events VALUES {values};"
     monetdblite.sql(sql, client=conn)
 
-# Leitura dos arquivos e inserção dos dados
-for uf in STATES:
-    folder_path = f"../data/logs/2_{uf}"
-    if os.path.exists(folder_path):
-        for filename in os.listdir(folder_path):
-            if filename.endswith('.csv'):
-                csv_file = os.path.join(folder_path, filename)
-                print(f"Inserindo dados de {csv_file}...")
 
-                with open(csv_file, mode='r', encoding='utf-8') as f:
-                    reader = csv.reader(f, delimiter='\t')
-                    for row in reader:
-                        if len(row) != 6:
-                            print(f"Linha inválida no arquivo {filename}: {row}")
-                            continue
-                        row.append(filename)
-                        insert_row(row)
+def main():
+    start = time.perf_counter()
 
-fim = time.perf_counter()
+    monetdblite.init(DB_PATH)
+    conn = monetdblite.connect()
 
-print(f"Importação concluída em {fim - inicio:.2f} segundos.")
-del conn
+    create_table_if_needed(conn)
+
+    files = glob.glob(os.path.join(DATA_PATH, "2_*", "*.csv"))
+    total_rows = 0
+    batch = []
+    BATCH_SIZE = 500  # Tamanho ideal pode ser ajustado
+
+    for csv_file in files:
+        print(f"Inserindo dados de {csv_file}...")
+        with open(csv_file, mode='r', encoding='utf-8') as f:
+            reader = csv.reader(f, delimiter='\t')
+            for row in reader:
+                if len(row) != 6:
+                    print(f"Linha inválida no arquivo {csv_file}: {row}")
+                    continue
+                row.append(os.path.basename(csv_file))
+                batch.append(row)
+                total_rows += 1
+
+                if len(batch) >= BATCH_SIZE:
+                    insert_batch(conn, batch)
+                    batch = []
+
+    if batch:
+        insert_batch(conn, batch)
+
+    end = time.perf_counter()
+    print(f"\nImportação de {total_rows} linhas concluída em {end - start:.2f} segundos.")
+    del conn
+
+if __name__ == '__main__':
+    main()
