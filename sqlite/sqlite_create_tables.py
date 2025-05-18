@@ -1,6 +1,7 @@
 import csv
 import sqlite3
 import os
+import time
 
 STATES = [
     'AC', 'AL', 'AP', 'AM',
@@ -12,10 +13,10 @@ STATES = [
     'SE', 'TO'
 ]
 
+inicio = time.perf_counter()
 conn = sqlite3.connect('events.db')
 cur = conn.cursor()
 
-# Cria a tabela correta
 cur.execute('''
     CREATE TABLE IF NOT EXISTS events (
         event_timestamp TEXT,
@@ -49,6 +50,9 @@ for uf in STATES:
 
                     placeholders = ', '.join('?' for _ in range(7))  # 6 + 1
                     cur.executemany(f"INSERT INTO events VALUES ({placeholders})", rows)
+
+fim = time.perf_counter()
+print(f"Importação concluída em {fim - inicio:.2f} segundos.")
 
 conn.commit()
 conn.close()

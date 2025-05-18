@@ -4,7 +4,7 @@ import os
 import glob
 
 if __name__ == "__main__":
-    inicio = time.time()
+    inicio = time.perf_counter()
 
     conn = duckdb.connect()
 
@@ -30,5 +30,5 @@ if __name__ == "__main__":
         conn.execute(query)
         conn.close()
 
-        fim = time.time()
+        fim = time.perf_counter()
         print(f"\nProcessamento completo em {fim - inicio:.2f} segundos")

@@ -1,5 +1,6 @@
 import duckdb
 import pandas as pd
+import time
 
 csv_path = './VOTOS_POR_UF.csv'
 
@@ -62,6 +63,8 @@ query_vote_data = f"""
     ORDER BY tempo_medio_voto_segundos DESC
     LIMIT 10    
 """
-
+tic=time.time()
 top_zonas = cursor.execute(query_vote_data).fetchdf()
+toc=time.time()
+print(F"A consulta demorou {toc-tic} segundos")
 print(top_zonas)
