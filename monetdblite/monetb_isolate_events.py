@@ -75,12 +75,12 @@ query = f"""
             event_system,
             event_description,
             event_id,
-            filename,
             -- Extrações da UF e códigos da seção/município
-            REPLACE(SPLIT_PART(filename, '/', 2), '2_', '') AS uf,
-            SUBSTRING(SPLIT_PART(filename, '/', 3), 2, 5) AS city_code,
-            SUBSTRING(SPLIT_PART(filename, '/', 3), 7, 4) AS zone_code,
-            SUBSTRING(SPLIT_PART(filename, '/', 3), 11, 4) AS section_code
+            REPLACE(filename, '_new.csv', '') AS filename,
+            SUBSTRING(filename, 2, 5) AS city_code,
+            SUBSTRING(filename, 7, 2) AS uf,
+            SUBSTRING(filename, 7, 4) AS zone_code,
+            SUBSTRING(filename, 11, 4) AS section_code
         FROM events
         WHERE ({' OR '.join(ALL_FILTERS)})
     ) AS CONSULTA
