@@ -3,6 +3,7 @@ import csv
 import glob
 import time
 import monetdblite
+from datetime import datetime
 
 DB_PATH = './events_monet'
 DATA_PATH = '../data/logs'
@@ -11,7 +12,7 @@ def create_table_if_needed(conn):
     try:
         monetdblite.sql('''
             CREATE TABLE events (
-                event_timestamp VARCHAR(50),
+                event_timestamp TIMESTAMP,
                 event_type VARCHAR(100),
                 some_id VARCHAR(50),
                 event_system VARCHAR(100),
@@ -33,6 +34,7 @@ def create_table_if_needed(conn):
 def insert_batch(conn, rows):
     if not rows:
         return
+
     values = ",\n".join([
         "('{}', '{}', '{}', '{}', '{}', '{}', '{}')".format(
             r[0].replace("'", "''"),
@@ -70,6 +72,15 @@ def main():
                 if len(row) != 6:
                     print(f"Linha inválida no arquivo {csv_file}: {row}")
                     continue
+
+                try:
+                    #print(row)
+                    dt = datetime.strptime(row[0].strip(), '%d/%m/%Y %H:%M:%S')
+                    row[0] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    #print(row[0])
+                except Exception as e:
+                    print(f"Erro na conversão de timestamp '{row[0]}' no arquivo {csv_file}: {e}")
+
                 row.append(os.path.basename(csv_file))
                 batch.append(row)
                 total_rows += 1

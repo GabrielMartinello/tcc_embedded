@@ -47,7 +47,7 @@ query = F"""
         *
     FROM (
         SELECT
-            column0 as event_timestamp,
+            column0::timestamp as event_timestamp,
             event_timestamp::date AS event_date,
             column1 as event_type,
             column2 as some_id,
@@ -64,7 +64,7 @@ query = F"""
             read_csv_auto('{csv_path}')
         WHERE 1=1
             AND ( {' OR '.join(ALL_FILTERS)} )
-    ) _
+    ) 
     WHERE 1=1
     AND event_date IN ({', '.join([F"'{date}'" for date in ACCEPTED_DATES])})
 """
