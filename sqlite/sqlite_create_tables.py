@@ -2,6 +2,7 @@ import csv
 import sqlite3
 import os
 import time
+from datetime import datetime
 
 STATES = [
     'AC', 'AL', 'AP', 'AM',
@@ -19,7 +20,7 @@ cur = conn.cursor()
 
 cur.execute('''
     CREATE TABLE IF NOT EXISTS events (
-        event_timestamp TEXT,
+        event_timestamp DATETIME,
         event_type TEXT,
         some_id TEXT,
         event_system TEXT,
@@ -45,6 +46,16 @@ for uf in STATES:
                         if len(row) != 6:
                             print(f"Linha inválida no arquivo {filename}: {row}")
                             continue
+
+                        try:
+                            #print(row)
+                            dt = datetime.strptime(row[0].strip(), '%d/%m/%Y %H:%M:%S')
+                            row[0] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                            #print(row[0])
+                        except Exception as e:
+                            print(f"Erro na conversão de timestamp '{row[0]}' no arquivo {filename}: {e}")
+                            continue
+                       
                         row.append(filename)  # Adiciona o nome do arquivo
                         rows.append(row)
 
