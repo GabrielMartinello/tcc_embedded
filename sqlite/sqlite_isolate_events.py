@@ -45,29 +45,95 @@ accepted_dates_sql = ', '.join(f"'{d}'" for d in ACCEPTED_DATES)
 query=f"""SELECT * FROM (
         SELECT 
             event_timestamp,
-            DATE(SUBSTR(event_timestamp, 7, 4) || '-' || SUBSTR(event_timestamp, 4, 2) || '-' || SUBSTR(event_timestamp, 1, 2)) AS event_date,
+            DATE(event_timestamp) AS event_date,
             event_type,
             some_id,
             event_system,
             event_description,
             event_id,
             filename,
-            REPLACE(filename, '_new.csv', '') AS cleaned_filename,
             SUBSTR(filename, 2, 5) AS city_code,
             SUBSTR(filename, 7, 2) AS uf,
             SUBSTR(filename, 7, 4) AS zone_code,
-            SUBSTR(filename, 11, 4) AS section_code
+            SUBSTR(filename, 11, 4) AS section_code,
+            '' as ident_id
         FROM events
         WHERE ({' OR '.join(ALL_FILTERS)})
     ) AS CONSULTA
     WHERE event_date IN ({accepted_dates_sql});"""
 
 start = time.perf_counter()
+print(query)
+cur.execute(query)
+controleVoto = 0
+identificador = 0
+
+dados_transformados = []
+ids_computados = []
+
+for row in cur.fetchall():
+    event_timestamp = row[0]
+    event_date = row[1]
+    event_type = row[2]
+    some_id = row[3]
+    event_system = row[4]
+    event_description = row[5]
+    event_id = row [6]
+    filename  = row [7]
+    city_code = row[8]
+    uf = row [9]
+    zone_code  = row[10]
+    section_code = row[11]
+    ident_id = row[12]
+
+    if (some_id not in ids_computados and event_system == 'GAP' and 'Identificação do Modelo' in event_description):
+        controleVoto += 1
+        ids_computados.append(some_id)
+
+    if(event_system == 'VOTA' and event_description == 'Urna pronta para receber votos'):
+        controleVoto += 1
+
+    ident_id = controleVoto  
+
+    if(event_system == 'VOTA' and event_description == 'O voto do eleitor foi computado'):
+        controleVoto += 1
+
+    event_timestamp = row[0]
+    dados_transformados.append((
+        event_timestamp,
+        event_date,
+        event_type,
+        some_id,
+        event_system, 
+        event_description,
+        event_id,
+        filename,
+        city_code,
+        uf,
+        zone_code,
+        section_code,
+        ident_id
+    ))
+
 cur.execute("DROP TABLE IF EXISTS votos_por_uf;")  # Remove se já existir
-cur.execute(f"""
-    CREATE TABLE votos_por_uf AS
-    {query}
-""")
+cur.execute('''
+    CREATE TABLE IF NOT EXISTS votos_por_uf (
+        event_timestamp DATETIME,
+        event_date DATE,
+        event_type TEXT,
+        some_id TEXT,
+        event_system TEXT,
+        event_description TEXT,
+        event_id TEXT ,
+        filename TEXT,
+        city_code TEXT,
+        uf TEXT,
+        zone_code TEXT,
+        section_code,
+        ident_id
+    )
+''')
+cur.executemany("INSERT INTO votos_por_uf VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", dados_transformados)
 conn.commit()
 end = time.perf_counter()
 
