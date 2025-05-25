@@ -133,6 +133,30 @@ cur.execute('''
         ident_id
     )
 ''')
+dropQueyIndex="""
+DROP INDEX IF EXISTS event_index;
+DROP INDEX IF EXISTS event_time_stamp_index;
+DROP INDEX IF EXISTS some_id_index;
+DROP INDEX IF EXISTS event_system_index;
+DROP INDEX IF EXISTS key_votos_por_uf;
+DROP INDEX IF EXISTS ident_id;
+"""
+
+cur.executescript(dropQueyIndex)
+conn.commit()
+
+queyIndex="""
+CREATE INDEX event_index ON votos_por_uf (event_description);
+CREATE INDEX event_time_stamp_index ON votos_por_uf (event_timestamp);
+CREATE INDEX some_id_index ON votos_por_uf (some_id);
+CREATE INDEX event_system_index ON votos_por_uf (event_system);
+create index key_votos_por_uf on votos_por_uf (event_system, some_id, city_code, uf, zone_code, section_code );
+create index ident_id on votos_por_uf (ident_id);
+""" 
+cur.executescript(queyIndex)
+conn.commit()
+
+
 cur.executemany("INSERT INTO votos_por_uf VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", dados_transformados)
 conn.commit()
 end = time.perf_counter()
