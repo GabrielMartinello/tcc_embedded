@@ -4,10 +4,12 @@ import time
 conn = sqlite3.connect('events.db')
 cur = conn.cursor()
 
+cur_select = conn.cursor() 
+cur_insert = conn.cursor()
+
 print("Criando tabela 'votos_por_uf' no SQLite...")
 
 ACCEPTED_DATES = ['2024-10-27', '2024-11-29', '2024-10-28', '2024-11-30']
-
 COLUMN_EVENT_DESCRIPTION = 'event_description'
 
 METADATA = [
@@ -64,47 +66,65 @@ query=f"""SELECT * FROM (
 
 start = time.perf_counter()
 print(query)
-cur.execute(query)
+
+cur_insert.execute("DROP TABLE IF EXISTS votos_por_uf;")
+cur_insert.execute('''
+    CREATE TABLE votos_por_uf (
+        event_timestamp DATETIME,
+        event_date DATE,
+        event_type TEXT,
+        some_id TEXT,
+        event_system TEXT,
+        event_description TEXT,
+        event_id TEXT,
+        filename TEXT,
+        city_code TEXT,
+        uf TEXT,
+        zone_code TEXT,
+        section_code TEXT,
+        ident_id INTEGER
+    )
+''')
+
 controleVoto = 0
-identificador = 0
+ids_computados = set()
+batch = []
+batch_size = 1000
 
-dados_transformados = []
-ids_computados = []
-
-for row in cur.fetchall():
+#Otimizado pra não explodir o PC
+for row in cur_select.execute(query):
     event_timestamp = row[0]
     event_date = row[1]
     event_type = row[2]
     some_id = row[3]
     event_system = row[4]
     event_description = row[5]
-    event_id = row [6]
-    filename  = row [7]
+    event_id = row[6]
+    filename = row[7]
     city_code = row[8]
-    uf = row [9]
-    zone_code  = row[10]
+    uf = row[9]
+    zone_code = row[10]
     section_code = row[11]
     ident_id = row[12]
 
     if (some_id not in ids_computados and event_system == 'GAP' and 'Identificação do Modelo' in event_description):
         controleVoto += 1
-        ids_computados.append(some_id)
+        ids_computados.add(some_id)
 
-    if(event_system == 'VOTA' and event_description == 'Urna pronta para receber votos'):
+    if event_system == 'VOTA' and event_description == 'Urna pronta para receber votos':
         controleVoto += 1
 
-    ident_id = controleVoto  
+    ident_id = controleVoto
 
-    if(event_system == 'VOTA' and event_description == 'O voto do eleitor foi computado'):
+    if event_system == 'VOTA' and event_description == 'O voto do eleitor foi computado':
         controleVoto += 1
 
-    event_timestamp = row[0]
-    dados_transformados.append((
+    batch.append((
         event_timestamp,
         event_date,
         event_type,
         some_id,
-        event_system, 
+        event_system,
         event_description,
         event_id,
         filename,
@@ -115,50 +135,28 @@ for row in cur.fetchall():
         ident_id
     ))
 
-cur.execute("DROP TABLE IF EXISTS votos_por_uf;")  # Remove se já existir
-cur.execute('''
-    CREATE TABLE IF NOT EXISTS votos_por_uf (
-        event_timestamp DATETIME,
-        event_date DATE,
-        event_type TEXT,
-        some_id TEXT,
-        event_system TEXT,
-        event_description TEXT,
-        event_id TEXT ,
-        filename TEXT,
-        city_code TEXT,
-        uf TEXT,
-        zone_code TEXT,
-        section_code,
-        ident_id
-    )
-''')
-dropQueyIndex="""
-DROP INDEX IF EXISTS event_index;
-DROP INDEX IF EXISTS event_time_stamp_index;
-DROP INDEX IF EXISTS some_id_index;
-DROP INDEX IF EXISTS event_system_index;
-DROP INDEX IF EXISTS key_votos_por_uf;
-DROP INDEX IF EXISTS ident_id;
-"""
+    # Otimizacao pra nao matar o PC, pq foi o que quase aconteceu com o meu
+    if len(batch) >= batch_size:
+        cur_insert.executemany("INSERT INTO votos_por_uf VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
+        conn.commit()
+        batch.clear()
 
-cur.executescript(dropQueyIndex)
-conn.commit()
+if batch:
+    cur_insert.executemany("INSERT INTO votos_por_uf VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
+    conn.commit()
 
-queyIndex="""
+# Criar índices
+createIndexQuery = """
 CREATE INDEX event_index ON votos_por_uf (event_description);
 CREATE INDEX event_time_stamp_index ON votos_por_uf (event_timestamp);
 CREATE INDEX some_id_index ON votos_por_uf (some_id);
 CREATE INDEX event_system_index ON votos_por_uf (event_system);
-create index key_votos_por_uf on votos_por_uf (event_system, some_id, city_code, uf, zone_code, section_code );
-create index ident_id on votos_por_uf (ident_id);
-""" 
-cur.executescript(queyIndex)
+CREATE INDEX ident_id ON votos_por_uf (ident_id);
+CREATE INDEX key_votos_por_uf ON votos_por_uf (ident_id, event_system, some_id, city_code, uf, zone_code, section_code);
+"""
+cur_insert.executescript(createIndexQuery)
 conn.commit()
 
-
-cur.executemany("INSERT INTO votos_por_uf VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", dados_transformados)
-conn.commit()
 end = time.perf_counter()
 
 print(f"Tabela criada em {end - start:.2f} segundos.")
