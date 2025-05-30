@@ -1,95 +1,142 @@
+import polars as pl
 import duckdb
+import glob
 import os
 import time
+from datetime import datetime
 
-COLUMN_EVENT_DESCRIPTION = 'event_description'
+base_path = os.path.abspath("../data/logs")
+pattern = os.path.join(base_path, "2_*", "*_new.csv")
+files = glob.glob(pattern)
 
-METADATA = [
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Zona Eleitoral%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Seção Eleitoral%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Município%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Local de Votação%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Turno da UE%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Identificação do Modelo de Urna%'"
-]
-
-EVENTS_DESCRIPTIONS = [
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Urna pronta para receber vot%'",
-]
-
-VOTES_DESCRIPTIONS = [
-    # VOTOS
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Aguardando digitação do identificador do eleitor'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Identificador do eleitor digitado pelo mesário'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Eleitor foi habilitado'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Voto confirmado par%'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'O voto do eleitor foi computado'",
-    
-    # BIOMETRIA
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE '%Digital%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Tipo de habilitação do eleitor [biométrica]%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Solicita digital%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Solicitação de dado pessoal do eleitor para habilitação manual' ",
-]
+if not files:
+    raise FileNotFoundError("Nenhum arquivo CSV encontrado.")
 
 ACCEPTED_DATES = [
-    '2024-10-27', '2024-11-29', # Data constitucional da eleição
-    '2024-10-28', '2024-11-30', # No caso da seção 'virar a noite' e acabar depois da meia noite, imagino que sejam casos RARÍSSIMOS
+    '2024-10-27', '2024-11-29',
+    '2024-10-28', '2024-11-30',
 ]
 
-ALL_FILTERS = METADATA + EVENTS_DESCRIPTIONS + VOTES_DESCRIPTIONS
-print('Filtros: ', ALL_FILTERS)
+FILTROS_EXACT = [
+    'Aguardando digitação do identificador do eleitor',
+    'Identificador do eleitor digitado pelo mesário',
+    'Eleitor foi habilitado',
+    'O voto do eleitor foi computado',
+    'Solicitação de dado pessoal do eleitor para habilitação manual'
+]
 
-csv_path = './ALL_UFS.csv'
+FILTROS_LIKE = [
+    'Zona Eleitoral%',
+    'Seção Eleitoral%',
+    'Município%',
+    'Local de Votação%',
+    'Turno da UE%',
+    'Identificação do Modelo de Urna%',
+    'Urna pronta para receber vot%',
+    'Voto confirmado par%',
+    '%Digital%',
+    'Tipo de habilitação do eleitor [biométrica]%',
+    'Solicita digital%'
+]
 
-query = F"""
-    SELECT 
-        *
-    FROM (
-        SELECT
-            column0::timestamp as event_timestamp,
-            event_timestamp::date AS event_date,
-            column1 as event_type,
-            column2 as some_id,
-            column3 as event_system,
-            column4 as event_description,
-            column5 as event_id,
-            REPLACE(SPLIT_PART(filename, '\\', 8), '_new.csv', '') AS filename,
-            -- Metadata from filename
-            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1),  2, 5 ) AS city_code,
-            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1),  7, 4 ) AS zone_code,
-            SUBSTRING( SPLIT_PART(SPLIT_PART(filename, '\\', 8), '-', 1), 11, 4 ) AS section_code,
-            REPLACE(SPLIT_PART(filename, '\\', 7), '2_', '') AS uf
-        FROM
-            read_csv_auto('{csv_path}')
-        WHERE 1=1
-            AND ( {' OR '.join(ALL_FILTERS)} )
-    ) 
-    WHERE 1=1
-    AND event_date IN ({', '.join([F"'{date}'" for date in ACCEPTED_DATES])})
+print("Lendo arquivos CSV...")
+
+start = time.perf_counter()
+
+dfs = []
+for file in files:
+    df_temp = pl.read_csv(
+        file,
+        separator="\t",
+        encoding="utf8-lossy",
+        has_header=False
+    ).with_columns(
+        pl.lit(file).alias("filename")
+    )
+    dfs.append(df_temp)
+
+df = pl.concat(dfs)
+
+df = df.rename({
+    "column_1": "event_timestamp",
+    "column_2": "event_type",
+    "column_3": "some_id",
+    "column_4": "event_system",
+    "column_5": "event_description",
+    "column_6": "event_id"
+})
+
+df = df.with_columns([
+    pl.col("filename").str.extract(r'2_([A-Z]{2})', 1).alias("uf"),
+    pl.col("filename").str.extract(r'([^\\/]+)$', 1).alias("filename_only")
+])
+
+df = df.with_columns([
+    pl.col("event_timestamp").str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M:%S", strict=False),
+    pl.col("filename_only").str.slice(8, 5).alias("city_code"),  
+    pl.col("filename_only").str.slice(13, 4).alias("zone_code"),   
+    pl.col("filename_only").str.slice(17, 4).alias("section_code"), 
+])
+
+df = df.with_columns(
+    pl.col("event_timestamp").dt.date().alias("event_date")
+)
+
+df = df.with_columns(
+    pl.col("event_description").str.strip_chars().str.to_lowercase()
+)
+
+filtros_exact_lower = [f.lower() for f in FILTROS_EXACT]
+filtros_like_lower = [f.lower() for f in FILTROS_LIKE]
+
+print("Aplicando filtros no Polars...")
+
+accepted_dates_dt = [datetime.strptime(d, "%Y-%m-%d").date() for d in ACCEPTED_DATES]
+
+like_conditions = []
+for pattern in filtros_like_lower:
+    if pattern.startswith('%') and pattern.endswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.contains(pattern.strip('%'), literal=False)
+        )
+    elif pattern.endswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.starts_with(pattern.rstrip('%'))
+        )
+    elif pattern.startswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.ends_with(pattern.lstrip('%'))
+        )
+    else:
+        like_conditions.append(pl.col("event_description") == pattern)
+
+like_filter = pl.any_horizontal(like_conditions) if like_conditions else pl.lit(True)
+
+exact_filter = pl.col("event_description").is_in(filtros_exact_lower)
+
+date_filter = pl.col("event_date").is_in(accepted_dates_dt)
+
+df_filtered = df.filter(
+    (exact_filter | like_filter) & date_filter
+)
+
+print(f"Linhas após filtro: {df_filtered.shape[0]}")
+
+print("Conectando ao DuckDB...")
+con = duckdb.connect("banco_bagre.duckdb")
+con.execute("PRAGMA memory_limit='4GB';")
+con.register("events_df_view", df_filtered)
+con.execute("DROP TABLE IF EXISTS events_df;")
+
+query = """
+CREATE TABLE events_df AS 
+SELECT * FROM events_df_view;
 """
 
-print('Query: ', query)
+print("Executando query SQL...")
+con.execute(query)
+print("Query executada com sucesso.")
+end = time.perf_counter()
+print(f"\nProcesso concluído em {end - start:.2f} segundos")
 
-if not os.path.exists(csv_path):
-    raise FileNotFoundError(f'O arquivo {csv_path} não foi encontrado.')
-
-con = duckdb.connect()
-tic = time.time()
-result = con.execute(query).fetchdf()
-print(result)
-toc = time.time()
-
-print(F"A consulta demorou {toc - tic}s")
-
-#Para ficar em uma visualizacao melhor e nao ter que ficar fazendo esse sql
-#Movi para um arquivo .csv para ficar mais fácil de ver
-print('Iniciando copy para arquivo .csv filtrado para votos')
-queryEvents = F"""
-        COPY ({query}) TO 'VOTOS_POR_UF.csv' (FORMAT CSV, HEADER);
-    """
-tic = time.time()
-con.execute(queryEvents)
-toc = time.time()
-
-print(F"Tempo para montar csv VOTOS_POR_UF {toc - tic}s")
+con.close()
