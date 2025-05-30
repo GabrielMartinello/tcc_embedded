@@ -1,102 +1,62 @@
 import duckdb
-import pandas as pd
 import time
 
-csv_path = './VOTOS_POR_UF.csv'
+con = duckdb.connect("banco_bagre.duckdb")
 
-cursor = duckdb.connect()
+# Saber inicio do voto
+ANCORA = 'aguardando digitação do identificador do eleitor'
+#Fim do voto
+FIM_VOTO = 'o voto do eleitor foi computado'
 
-#utilizei isso pra calcular o tempo médio de votação por zona eleitoral com base na diferença entre os eventos:
-#Ou seja, a constante ANCORA é para o início do voto
-ANCORA = 'Aguardando digitação do identificador do eleitor'
-#E aqui é pra o fim do voto, preciso disso pra pegar a data e subtrair as diferenças deles
-FIM_VOTO = 'O voto do eleitor foi computado'
-
-# Cria uma tabela temporaria chamada base
-# Soma 1 sempre que aparece o evento de início
-# Agrupa por event_date, uf e filename (evita mistura de arquivos ou dias diferentes)
-# Ordena por event_timestamp (ordem dos eventos)
-# Como não há um identificador de eleitor direto, o vote_id é criado com base 
-# no número de vezes que o evento de início de voto aparece 
-# cada nova ocorrência representa um novo voto.
-# Calcula o tempo médio por zonas
-query_vote_data = f"""
-WITH dados AS (
-    SELECT 
-        *,
-        CAST(event_timestamp AS TIMESTAMP) AS ts
-    FROM read_csv_auto('{csv_path}')
-    WHERE event_description IN ('{ANCORA}', '{FIM_VOTO}')
-),
-inicio AS (
-    SELECT 
-        ts AS inicio_voto,
-        uf,
-        event_date,
-        filename,
-        city_code,
-        zone_code,
-        section_code,
-        ROW_NUMBER() OVER (
-            PARTITION BY event_date, uf, filename, city_code, zone_code, section_code
-            ORDER BY ts
-        ) AS vote_id
-    FROM dados
-    WHERE event_description = '{ANCORA}'
-),
-fim AS (
-    SELECT 
-        ts AS fim_voto,
-        uf,
-        event_date,
-        filename,
-        city_code,
-        zone_code,
-        section_code,
-        ROW_NUMBER() OVER (
-            PARTITION BY event_date, uf, filename, city_code, zone_code, section_code
-            ORDER BY ts
-        ) AS vote_id
-    FROM dados
-    WHERE event_description = '{FIM_VOTO}'
-),
-votos_pareados AS (
-    SELECT 
-        i.uf,
-        i.event_date,
-        i.zone_code,
-        i.section_code,
-        i.vote_id,
-        i.inicio_voto,
-        f.fim_voto,
-        i.city_code,
-        EXTRACT(EPOCH FROM f.fim_voto - i.inicio_voto) AS duracao_segundos
-    FROM inicio i
-    JOIN fim f
-        ON i.uf = f.uf 
-        AND i.event_date = f.event_date
-        AND i.filename = f.filename
-        AND i.city_code = f.city_code
-        AND i.zone_code = f.zone_code
-        AND i.section_code = f.section_code
-        AND i.vote_id = f.vote_id
-    WHERE f.fim_voto > i.inicio_voto
-)
-SELECT 
-    uf,
-    zone_code,
-    section_code,
-    city_code,
-    AVG(duracao_segundos) AS tempo_medio_voto_segundos,
-    COUNT(*) AS total_votos
-FROM votos_pareados
-GROUP BY uf, zone_code, section_code, city_code
-ORDER BY tempo_medio_voto_segundos DESC
-LIMIT 10
-"""
+query_vote_data = f"""select z.zone_code,
+       avg(z.tempo_voto) as tempo_medio_zona
+    from (select y.uf,
+                y.city_code,
+                y.zone_code,
+                y.section_code,
+                y.urna_num,
+                y.urna,
+                y.evento,
+                (y.tempo_final - julian(y.data_inicio)) * 1440 as tempo_voto,
+                y.data_inicio,
+                y.event_timestamp as data_final
+            from (select x.*,
+                        (select max(vt.event_timestamp)
+                            from events_df vt
+                            where vt.event_system = x.event_system
+                            and vt.event_description = '{ANCORA}'
+                            and vt.uf = x.uf
+                            and vt.city_code = x.city_code
+                            and vt.zone_code = x.zone_code
+                            and vt.section_code = x.section_code
+                            and vt.some_id = x.urna_num
+                            and julian(vt.event_timestamp) < x.tempo_final) as data_inicio
+                    from (SELECT voto.uf,
+                                voto.city_code,
+                                voto.zone_code,
+                                voto.section_code,
+                                voto.event_system,
+                                voto.some_id as urna_num,
+                                julian(voto.event_timestamp) as tempo_final,
+                                voto.event_description as evento,
+                                (SELECT STRING_AGG(event_description) as urna_info
+                                    FROM events_df urna
+                                    WHERE urna.event_system = 'GAP'
+                                    and urna.some_id = voto.some_id
+                                    and urna.city_code = voto.city_code
+                                    and urna.uf = voto.uf
+                                    and urna.zone_code = voto.zone_code
+                                    and urna.section_code = voto.section_code) as urna,
+                                voto.event_timestamp
+                            FROM events_df voto
+                    WHERE voto.event_system = 'VOTA'
+                    and voto.event_description = '{FIM_VOTO}'
+                    order by voto.uf, voto.city_code, voto.zone_code, voto.section_code, voto.some_id, voto.event_timestamp) x) Y ) Z
+    group by z.zone_code
+    order by tempo_medio_zona desc"""
 
 tic=time.time()
-top_zonas = cursor.execute(query_vote_data).fetchdf()
+top_zonas = con.execute(query_vote_data).fetchdf()
 toc=time.time()
 print(F"A consulta demorou {toc-tic} segundos")
 print(top_zonas)
