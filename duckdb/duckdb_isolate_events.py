@@ -4,6 +4,7 @@ import glob
 import os
 import time
 from datetime import datetime
+from query.db_duck import con
 
 base_path = os.path.abspath("../data/logs")
 pattern = os.path.join(base_path, "2_*", "*_new.csv")
@@ -121,8 +122,6 @@ df_filtered = df.filter(
 print(f"Linhas após filtro: {df_filtered.shape[0]}")
 
 print("Conectando ao DuckDB...")
-con = duckdb.connect("banco_bagre.duckdb")
-con.execute("PRAGMA memory_limit='4GB';")
 con.register("events_df_view", df_filtered)
 con.execute("DROP TABLE IF EXISTS events_df;")
 

@@ -1,163 +1,184 @@
-import sqlite3
+import polars as pl
+import glob
+import os
 import time
+from datetime import datetime
+from sqlalchemy import create_engine, Table, Column, String, MetaData, DateTime, Date, text, Integer
 
-conn = sqlite3.connect('events.db')
-cur = conn.cursor()
 
-cur_select = conn.cursor() 
-cur_insert = conn.cursor()
+base_path = os.path.abspath("../data/logs")
+pattern = os.path.join(base_path, "2_*", "*_new.csv")
+files = glob.glob(pattern)
 
-print("Criando tabela 'votos_por_uf' no SQLite...")
+if not files:
+    raise FileNotFoundError("Nenhum arquivo CSV encontrado.")
 
-ACCEPTED_DATES = ['2024-10-27', '2024-11-29', '2024-10-28', '2024-11-30']
-COLUMN_EVENT_DESCRIPTION = 'event_description'
-
-METADATA = [
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Zona Eleitoral%'",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Seção Eleitoral%'",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Município%'",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Local de Votação%'",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Turno da UE%'",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Identificação do Modelo de Urna%'"
+ACCEPTED_DATES = [
+    '2024-10-27', '2024-11-29',
+    '2024-10-28', '2024-11-30',
 ]
 
-EVENTS_DESCRIPTIONS = [
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Urna pronta para receber vot%'",
+FILTROS_EXACT = [
+    'Aguardando digitação do identificador do eleitor',
+    'Identificador do eleitor digitado pelo mesário',
+    'Eleitor foi habilitado',
+    'O voto do eleitor foi computado',
+    'Solicitação de dado pessoal do eleitor para habilitação manual'
 ]
 
-VOTES_DESCRIPTIONS = [
-    # VOTOS
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Aguardando digitação do identificador do eleitor'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Identificador do eleitor digitado pelo mesário'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Eleitor foi habilitado'",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Voto confirmado par%'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'O voto do eleitor foi computado'",
-    
-    # BIOMETRIA
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE '%Digital%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Tipo de habilitação do eleitor [biométrica]%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} LIKE 'Solicita digital%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Solicitação de dado pessoal do eleitor para habilitação manual' ",
+FILTROS_LIKE = [
+    'Zona Eleitoral%',
+    'Seção Eleitoral%',
+    'Município%',
+    'Local de Votação%',
+    'Turno da UE%',
+    'Identificação do Modelo de Urna%',
+    'Urna pronta para receber vot%',
+    'Voto confirmado par%',
+    '%Digital%',
+    'Tipo de habilitação do eleitor [biométrica]%',
+    'Solicita digital%'
 ]
 
-ALL_FILTERS = METADATA + EVENTS_DESCRIPTIONS + VOTES_DESCRIPTIONS
 
-accepted_dates_sql = ', '.join(f"'{d}'" for d in ACCEPTED_DATES)
-
-query=f"""SELECT * FROM (
-        SELECT 
-            event_timestamp,
-            DATE(event_timestamp) AS event_date,
-            event_type,
-            some_id,
-            event_system,
-            event_description,
-            event_id,
-            filename,
-            SUBSTR(filename, 2, 5) AS city_code,
-            SUBSTR(filename, 7, 2) AS uf,
-            SUBSTR(filename, 7, 4) AS zone_code,
-            SUBSTR(filename, 11, 4) AS section_code,
-            '' as ident_id
-        FROM events
-        WHERE ({' OR '.join(ALL_FILTERS)})
-    ) AS CONSULTA
-    WHERE event_date IN ({accepted_dates_sql});"""
-
+print("Lendo arquivos CSV...")
 start = time.perf_counter()
-print(query)
 
-cur_insert.execute("DROP TABLE IF EXISTS votos_por_uf;")
-cur_insert.execute('''
-    CREATE TABLE votos_por_uf (
-        event_timestamp DATETIME,
-        event_date DATE,
-        event_type TEXT,
-        some_id TEXT,
-        event_system TEXT,
-        event_description TEXT,
-        event_id TEXT,
-        filename TEXT,
-        city_code TEXT,
-        uf TEXT,
-        zone_code TEXT,
-        section_code TEXT,
-        ident_id INTEGER
+dfs = []
+for file in files:
+    df_temp = pl.read_csv(
+        file,
+        separator="\t",
+        encoding="utf8-lossy",
+        has_header=False
+    ).with_columns(
+        pl.lit(file).alias("filename")
     )
-''')
+    dfs.append(df_temp)
 
-controleVoto = 0
-ids_computados = set()
-batch = []
-batch_size = 1000
+df = pl.concat(dfs)
 
-#Otimizado pra não explodir o PC
-for row in cur_select.execute(query):
-    event_timestamp = row[0]
-    event_date = row[1]
-    event_type = row[2]
-    some_id = row[3]
-    event_system = row[4]
-    event_description = row[5]
-    event_id = row[6]
-    filename = row[7]
-    city_code = row[8]
-    uf = row[9]
-    zone_code = row[10]
-    section_code = row[11]
-    ident_id = row[12]
+df = df.rename({
+    "column_1": "event_timestamp",
+    "column_2": "event_type",
+    "column_3": "some_id",
+    "column_4": "event_system",
+    "column_5": "event_description",
+    "column_6": "event_id"
+})
 
-    if (some_id not in ids_computados and event_system == 'GAP' and 'Identificação do Modelo' in event_description):
-        controleVoto += 1
-        ids_computados.add(some_id)
+df = df.with_columns([
+    pl.col("filename").str.extract(r'2_([A-Z]{2})', 1).alias("uf"),
+    pl.col("filename").str.extract(r'([^\\/]+)$', 1).alias("filename_only")
+])
 
-    if event_system == 'VOTA' and event_description == 'Urna pronta para receber votos':
-        controleVoto += 1
+df = df.with_columns([
+    pl.col("event_timestamp").str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M:%S", strict=False),
+    pl.col("filename_only").str.slice(8, 5).alias("city_code"),   # município
+    pl.col("filename_only").str.slice(13, 4).alias("zone_code"),  # zona
+    pl.col("filename_only").str.slice(17, 4).alias("section_code")# seção
+])
 
-    ident_id = controleVoto
+df = df.with_columns(
+    pl.col("event_timestamp").dt.date().alias("event_date")
+)
 
-    if event_system == 'VOTA' and event_description == 'O voto do eleitor foi computado':
-        controleVoto += 1
+df = df.with_columns(
+    pl.col("event_description").str.strip_chars().str.to_lowercase()
+)
 
-    batch.append((
-        event_timestamp,
-        event_date,
-        event_type,
-        some_id,
-        event_system,
-        event_description,
-        event_id,
-        filename,
-        city_code,
-        uf,
-        zone_code,
-        section_code,
-        ident_id
-    ))
+filtros_exact_lower = [f.lower() for f in FILTROS_EXACT]
+filtros_like_lower = [f.lower() for f in FILTROS_LIKE]
 
-    # Otimizacao pra nao matar o PC, pq foi o que quase aconteceu com o meu
-    if len(batch) >= batch_size:
-        cur_insert.executemany("INSERT INTO votos_por_uf VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
-        conn.commit()
-        batch.clear()
+accepted_dates_dt = [datetime.strptime(d, "%Y-%m-%d").date() for d in ACCEPTED_DATES]
 
-if batch:
-    cur_insert.executemany("INSERT INTO votos_por_uf VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
-    conn.commit()
+like_conditions = []
+for pattern in filtros_like_lower:
+    if pattern.startswith('%') and pattern.endswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.contains(pattern.strip('%'), literal=False)
+        )
+    elif pattern.endswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.starts_with(pattern.rstrip('%'))
+        )
+    elif pattern.startswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.ends_with(pattern.lstrip('%'))
+        )
+    else:
+        like_conditions.append(pl.col("event_description") == pattern)
 
-# Criar índices
-createIndexQuery = """
-CREATE INDEX event_index ON votos_por_uf (event_description);
-CREATE INDEX event_time_stamp_index ON votos_por_uf (event_timestamp);
-CREATE INDEX some_id_index ON votos_por_uf (some_id);
-CREATE INDEX event_system_index ON votos_por_uf (event_system);
-CREATE INDEX ident_id ON votos_por_uf (ident_id);
-CREATE INDEX key_votos_por_uf ON votos_por_uf (ident_id, event_system, some_id, city_code, uf, zone_code, section_code);
-"""
-cur_insert.executescript(createIndexQuery)
-conn.commit()
+like_filter = pl.any_horizontal(like_conditions) if like_conditions else pl.lit(True)
+exact_filter = pl.col("event_description").is_in(filtros_exact_lower)
+date_filter = pl.col("event_date").is_in(accepted_dates_dt)
 
+df_filtered = df.filter(
+    (exact_filter | like_filter) & date_filter
+)
+
+print(f"Linhas após filtro: {df_filtered.shape[0]}")
+print(df_filtered.schema)
+print("Conectando ao SQLite...")
+
+engine = create_engine("sqlite:///banco_bagre.db")
+metadata = MetaData()
+
+events_df_table = Table(
+    "events_df",
+    metadata,
+    Column("event_timestamp", DateTime),
+    Column("event_type", String),
+    Column("some_id", Integer),
+    Column("event_system", String),
+    Column("event_description", String),
+    Column("event_id", String),
+    Column("filename", String),
+    Column("uf", String),
+    Column("filename_only", String),
+    Column("city_code", String),
+    Column("zone_code", String),
+    Column("section_code", String),
+    Column("event_date", Date),
+)
+
+with engine.begin() as conn:
+    metadata.drop_all(conn)
+    metadata.create_all(conn)
+    conn.execute(text("PRAGMA synchronous = OFF")) 
+    conn.execute(text("PRAGMA journal_mode = MEMORY"))
+    conn.execute(text("VACUUM;"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_event_description ON events_df (event_description);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_event_timestamp ON events_df (event_timestamp);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_some_id ON events_df (some_id);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_event_system ON events_df (event_system);"))
+    conn.execute(text("""
+        CREATE INDEX IF NOT EXISTS idx_key_events_df 
+        ON events_df (event_system, some_id, city_code, uf, zone_code, section_code);
+    """))
+
+print("Convertendo polars para pandas")
+df_filtered_pd = df_filtered.to_pandas()
+print("Fim da conversão")
+print(df_filtered_pd.dtypes)    
+
+print(f"Inserindo linhas no sqlite")
+chunk_size = 100000
+
+for i in range(0, len(df_filtered_pd), chunk_size):
+    chunk = df_filtered_pd.iloc[i:i+chunk_size]
+    chunk.to_sql(
+        "events_df",
+        con=engine,
+        if_exists="append",
+        index=False,
+        method=None
+   )
+
+with engine.begin() as conn:
+    conn.execute(text("VACUUM;"))
+    conn.execute(text("ANALYZE;"))    
+
+print("Dados inseridos e índices criados com sucesso!")
 end = time.perf_counter()
-
-print(f"Tabela criada em {end - start:.2f} segundos.")
-conn.close()
+print(f"\nProcesso concluído em {end - start:.2f} segundos")
