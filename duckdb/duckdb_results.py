@@ -35,6 +35,21 @@ executar_consulta(queries.query_qtde_registros_eventos_sistema)
 
 print("Quantidade de Erros Alerta e Infos:.....")
 executar_consulta(queries.query_qtde_erro_alerta_info)
+
 print("\n"*2)
-print( "="*40, "EXECUTANDO CONSULTAS", "="*40)
+
+print( "="*40, "EXECUTANDO CONSULTAS DE AGREGAÇÃO", "="*40)
+
 print("\n")
+
+print("Top 10 pessoas que mais demoraram para votar:.....")
+executar_consulta(queries.query_top_10_pessoas_que_mais_demoraram)
+
+print("Tempo medio de voto por zonas:.....")
+executar_consulta(queries.query_tempo_medio_voto_por_zona)
+
+print("Tempo medio de voto por estados:.....")
+executar_consulta(queries.query_tempo_medio_voto_uf)
+
+print("Tempo médio de voto por cidades:.....")
+executar_consulta(queries.query_tempo_medio_voto_cidade)
