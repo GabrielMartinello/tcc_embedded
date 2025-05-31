@@ -111,9 +111,7 @@ for pattern in filtros_like_lower:
         like_conditions.append(pl.col("event_description") == pattern)
 
 like_filter = pl.any_horizontal(like_conditions) if like_conditions else pl.lit(True)
-
 exact_filter = pl.col("event_description").is_in(filtros_exact_lower)
-
 date_filter = pl.col("event_date").is_in(accepted_dates_dt)
 
 df_filtered = df.filter(
