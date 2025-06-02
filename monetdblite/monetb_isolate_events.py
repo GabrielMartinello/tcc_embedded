@@ -2,101 +2,175 @@ import monetdblite
 import time
 import os
 
+import polars as pl
+import glob
+import os
+import time
+from datetime import datetime
+
 DB_PATH = './events_monet'
-
 monetdblite.init(DB_PATH)
-con = monetdblite.connect()
+conn = monetdblite.connect()
 
-ACCEPTED_DATES = ['2024-10-27', '2024-11-29', '2024-10-28', '2024-11-30']
+base_path = os.path.abspath("../data/logs")
+pattern = os.path.join(base_path, "2_*", "*_new.csv")
+files = glob.glob(pattern)
 
-filters = [
-    "event_description ILIKE 'Zona Eleitoral%'",
-    "event_description ILIKE 'Seção Eleitoral%'",
-    "event_description ILIKE 'Município%'",
-    "event_description ILIKE 'Local de Votação%'",
-    "event_description ILIKE 'Turno da UE%'",
-    "event_description ILIKE 'Identificação do Modelo de Urna%'",
-    "event_description ILIKE 'Urna pronta para receber vot%'",
-    "event_description = 'Aguardando digitação do identificador do eleitor'",
-    "event_description = 'Identificador do eleitor digitado pelo mesário'",
-    "event_description = 'Eleitor foi habilitado'",
-    "event_description ILIKE 'Voto confirmado par%'",
-    "event_description = 'O voto do eleitor foi computado'",
-    "event_description ILIKE '%Digital%'",
-    "event_description ILIKE 'Tipo de habilitação do eleitor [biométrica]%'",
-    "event_description ILIKE 'Solicita digital%'",
-    "event_description = 'Solicitação de dado pessoal do eleitor para habilitação manual'"
+if not files:
+    raise FileNotFoundError("Nenhum arquivo CSV encontrado.")
+
+ACCEPTED_DATES = [
+    '2024-10-27', '2024-11-29',
+    '2024-10-28', '2024-11-30',
 ]
 
-COLUMN_EVENT_DESCRIPTION = 'event_description'
-
-METADATA = [
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Zona Eleitoral%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Seção Eleitoral%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Município%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Local de Votação%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Turno da UE%'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Identificação do Modelo de Urna%'"
+FILTROS_EXACT = [
+    'Aguardando digitação do identificador do eleitor',
+    'Identificador do eleitor digitado pelo mesário',
+    'Eleitor foi habilitado',
+    'O voto do eleitor foi computado',
+    'Solicitação de dado pessoal do eleitor para habilitação manual'
 ]
 
-EVENTS_DESCRIPTIONS = [
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Urna pronta para receber vot%'",
+FILTROS_LIKE = [
+    'Zona Eleitoral%',
+    'Seção Eleitoral%',
+    'Município%',
+    'Local de Votação%',
+    'Turno da UE%',
+    'Identificação do Modelo de Urna%',
+    'Urna pronta para receber vot%',
+    'Voto confirmado par%',
+    '%Digital%',
+    'Tipo de habilitação do eleitor [biométrica]%',
+    'Solicita digital%'
 ]
 
-VOTES_DESCRIPTIONS = [
-    # VOTOS
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Aguardando digitação do identificador do eleitor'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Identificador do eleitor digitado pelo mesário'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Eleitor foi habilitado'",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Voto confirmado par%'",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'O voto do eleitor foi computado'",
-    
-    # BIOMETRIA
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE '%Digital%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Tipo de habilitação do eleitor [biométrica]%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} ILIKE 'Solicita digital%' ",
-    F"{COLUMN_EVENT_DESCRIPTION} = 'Solicitação de dado pessoal do eleitor para habilitação manual' ",
-]
-
-ALL_FILTERS = METADATA + EVENTS_DESCRIPTIONS + VOTES_DESCRIPTIONS
-
-accepted_dates_sql = ', '.join(f"'{d}'" for d in ACCEPTED_DATES)
-
-query = f"""
-    SELECT * FROM (
-        SELECT 
-            event_timestamp,
-            CAST(
-                SUBSTRING(event_timestamp, 7, 4) || '-' || SUBSTRING(event_timestamp, 4, 2) || '-' || SUBSTRING(event_timestamp, 1, 2) 
-                AS DATE
-            ) AS event_date,
-            event_type,
-            some_id,
-            event_system,
-            event_description,
-            event_id,
-            -- Extrações da UF e códigos da seção/município
-            REPLACE(filename, '_new.csv', '') AS filename,
-            SUBSTRING(filename, 2, 5) AS city_code,
-            SUBSTRING(filename, 7, 2) AS uf,
-            SUBSTRING(filename, 7, 4) AS zone_code,
-            SUBSTRING(filename, 11, 4) AS section_code
-        FROM events
-        WHERE ({' OR '.join(ALL_FILTERS)})
-    ) AS CONSULTA
-    WHERE CONSULTA.event_date IN ({accepted_dates_sql})
-"""
-
-print("Criando nova tabela com os dados filtrados...")
+print("Lendo arquivos CSV...")
 start = time.perf_counter()
-create_table_query = f"""
-    CREATE TABLE votos_por_uf AS
-    {query}
-"""
 
-monetdblite.sql(create_table_query, client=con)
-print("Tabela 'votos_por_uf' criada com sucesso.")
+dfs = []
+for file in files:
+    df_temp = pl.read_csv(
+        file,
+        separator="\t",
+        encoding="utf8-lossy",
+        has_header=False
+    ).with_columns(
+        pl.lit(file).alias("filename")
+    )
+    dfs.append(df_temp)
+
+df = pl.concat(dfs)
+
+df = df.rename({
+    "column_1": "event_timestamp",
+    "column_2": "event_type",
+    "column_3": "some_id",
+    "column_4": "event_system",
+    "column_5": "event_description",
+    "column_6": "event_id"
+})
+
+df = df.with_columns([
+    pl.col("filename").str.extract(r'2_([A-Z]{2})', 1).alias("uf"),
+    pl.col("filename").str.extract(r'([^\\/]+)$', 1).alias("filename_only")
+])
+
+df = df.with_columns([
+    pl.col("event_timestamp").str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M:%S", strict=False),
+    pl.col("filename_only").str.slice(8, 5).alias("city_code"),  
+    pl.col("filename_only").str.slice(13, 4).alias("zone_code"),   
+    pl.col("filename_only").str.slice(17, 4).alias("section_code"), 
+])
+
+df = df.with_columns(
+    pl.col("event_timestamp").dt.date().alias("event_date")
+)
+
+df = df.with_columns(
+    pl.col("event_description").str.strip_chars().str.to_lowercase()
+)
+
+filtros_exact_lower = [f.lower() for f in FILTROS_EXACT]
+filtros_like_lower = [f.lower() for f in FILTROS_LIKE]
+
+print("Aplicando filtros no Polars...")
+
+accepted_dates_dt = [datetime.strptime(d, "%Y-%m-%d").date() for d in ACCEPTED_DATES]
+
+like_conditions = []
+for pattern in filtros_like_lower:
+    if pattern.startswith('%') and pattern.endswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.contains(pattern.strip('%'), literal=False)
+        )
+    elif pattern.endswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.starts_with(pattern.rstrip('%'))
+        )
+    elif pattern.startswith('%'):
+        like_conditions.append(
+            pl.col("event_description").str.ends_with(pattern.lstrip('%'))
+        )
+    else:
+        like_conditions.append(pl.col("event_description") == pattern)
+
+like_filter = pl.any_horizontal(like_conditions) if like_conditions else pl.lit(True)
+exact_filter = pl.col("event_description").is_in(filtros_exact_lower)
+date_filter = pl.col("event_date").is_in(accepted_dates_dt)
+
+df_filtered = df.filter(
+    (exact_filter | like_filter) & date_filter
+)
+
+print(f"Linhas após filtro: {df_filtered.shape[0]}")
+
+df = df.with_columns(
+    pl.col("event_timestamp").dt.strftime("%Y-%m-%d %H:%M:%S.%3f").alias("event_timestamp_str"),
+    pl.col("event_date").dt.strftime("%Y-%m-%d").alias("event_date")
+)
+
+output_csv = "./events_df.csv"
+df_filtered.write_csv(output_csv)
+# Remover cabeçalho do CSV
+with open(output_csv, 'r', encoding='utf8') as f:
+    lines = f.readlines()
+
+with open(output_csv, 'w', encoding='utf8') as f:
+    f.writelines(lines[1:])  # Remove o cabeçalho
+print(f"CSV tratado salvo em: {output_csv}")
+
+monetdblite.sql("""
+DROP TABLE eventos;
+""", client=conn)
+
+monetdblite.sql("""
+CREATE TABLE eventos (
+    event_timestamp TIMESTAMP,
+    event_type STRING,
+    some_id STRING,
+    event_system STRING,
+    event_description STRING,
+    event_id STRING,
+    filename STRING,
+    uf STRING,
+    filename_only STRING,
+    city_code STRING,
+    zone_code STRING,
+    section_code STRING,
+    event_date DATE
+);
+""", client=conn)
+
+# Carregando CSV
+csv_path = os.path.abspath('./events_df.csv')
+monetdblite.sql(f"""
+COPY INTO eventos
+FROM '{csv_path}'
+USING DELIMITERS ',', '\n', '\"' NULL AS '';
+""", client=conn)
+
+print("CSV carregado no MonetDBLite com sucesso.")
 end = time.perf_counter()
-print(f"Eventos isolados em {end - start:.2f}s")
-
-del con
+print(f"\nProcesso concluído em {end - start:.2f} segundos")
