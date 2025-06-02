@@ -4,6 +4,7 @@ import os
 import time
 from datetime import datetime
 from sqlalchemy import create_engine, Table, Column, String, MetaData, DateTime, Date, text, Integer
+from query.db_sqlite import get_engine
 
 
 base_path = os.path.abspath("../data/logs")
@@ -121,7 +122,7 @@ print(f"Linhas após filtro: {df_filtered.shape[0]}")
 print(df_filtered.schema)
 print("Conectando ao SQLite...")
 
-engine = create_engine("sqlite:///banco_bagre.db")
+engine = get_engine()
 metadata = MetaData()
 
 events_df_table = Table(
