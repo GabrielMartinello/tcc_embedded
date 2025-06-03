@@ -64,7 +64,7 @@ class GraficoBarrasPorConsulta:
     def __init__(self, dados_json):
         self.dados = dados_json["bancos"]
 
-    def plot(self, salvar_em="graphs/consultas/"):
+    def plot(self, salvar_em="graphs/"):
         # Descobrir todas as descrições únicas de consultas
         descricoes = set()
         for banco in self.dados:
