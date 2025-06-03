@@ -1,16 +1,17 @@
 import monetdblite
 import time
 import os
-
+import sys
 import polars as pl
 import glob
 import os
 import time
 from datetime import datetime
-
-DB_PATH = './events_monet'
-monetdblite.init(DB_PATH)
-conn = monetdblite.connect()
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+from gerar_json import registrar_benchmark_carga
+from resource_monitor import ResourceMonitor
+import psutil
+from query.db_monetdb import conn 
 
 base_path = os.path.abspath("../data/logs")
 pattern = os.path.join(base_path, "2_*", "*_new.csv")
@@ -47,6 +48,9 @@ FILTROS_LIKE = [
 ]
 
 print("Lendo arquivos CSV...")
+process = psutil.Process(os.getpid())
+monitor = ResourceMonitor(process, interval=0.2)  # Mede a cada 200ms
+monitor.start()
 start = time.perf_counter()
 
 dfs = []
@@ -141,9 +145,9 @@ with open(output_csv, 'w', encoding='utf8') as f:
     f.writelines(lines[1:])  # Remove o cabeçalho
 print(f"CSV tratado salvo em: {output_csv}")
 
-monetdblite.sql("""
-DROP TABLE eventos;
-""", client=conn)
+#monetdblite.sql("""
+#DROP TABLE eventos;
+#""", client=conn)
 
 monetdblite.sql("""
 CREATE TABLE eventos (
@@ -173,4 +177,31 @@ USING DELIMITERS ',', '\n', '\"' NULL AS '';
 
 print("CSV carregado no MonetDBLite com sucesso.")
 end = time.perf_counter()
+monitor.stop()
+monitor.join()
+
+tempo_execucao = end - start
+
+cpu_percent_medio = monitor.get_average_cpu()
+mem_before = monitor.mem_readings[0] if monitor.mem_readings else 0
+mem_after = monitor.mem_readings[-1] if monitor.mem_readings else 0
+mem_max = monitor.get_max_memory()
+
+tamanho_total_bytes = sum(os.path.getsize(f) for f in files)
+tamanho_total_mb = tamanho_total_bytes / (1024 * 1024)
+
+print(f"\nProcesso concluído em {tempo_execucao:.2f} segundos")
+print(f"Memória início: {mem_before:.2f} MB | final: {mem_after:.2f} MB | pico: {mem_max:.2f} MB")
+print(f"CPU percentual médio durante execução: {cpu_percent_medio:.2f}%")
 print(f"\nProcesso concluído em {end - start:.2f} segundos")
+
+registrar_benchmark_carga(
+    banco="MonetDBLite",
+    tempo_execucao=tempo_execucao,
+    linhas=df_filtered.shape[0],
+    arquivos=len(files),
+    tamanho_total_mb=tamanho_total_mb,
+    mem_before=mem_before,
+    mem_after=mem_after,
+    cpu_percent=cpu_percent_medio
+)

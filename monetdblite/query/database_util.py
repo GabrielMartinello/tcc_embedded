@@ -1,15 +1,16 @@
 import time
 import psutil
 import sys
-from .db_duck import con
+from .db_monetdb import conn
 import os
+import monetdblite
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 from gerar_json import salvar_resultados_consultas
 from resource_monitor import ResourceMonitor
 
 process = psutil.Process(os.getpid())
-banco_nome = "DuckDB"
+banco_nome = "MonetDBLite"
 
 def executar_consulta(query, descricao=""):
     process = psutil.Process(os.getpid())
@@ -17,10 +18,8 @@ def executar_consulta(query, descricao=""):
     monitor.start()
     tic = time.perf_counter()
 
-    result = con.execute(query).fetchdf()
-    print(result)
-    print("\n")
-
+    result = monetdblite.sql(query, conn)
+    
     toc = time.perf_counter()
     monitor.stop()
     monitor.join()
