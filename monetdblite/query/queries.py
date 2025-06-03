@@ -11,7 +11,7 @@ from (select y.uf,
             y.urna_num,
             y.urna,
             y.evento,
-            (y.tempo_final - julianday(y.data_inicio)) * 1440 as tempo_voto,
+            sys.epoch(y.data_termino - sys.epoch(y.data_inicio) as tempo_voto,
             y.data_inicio,
             y.event_timestamp as data_final
         from (select x.*,
@@ -24,14 +24,14 @@ from (select y.uf,
                         and vt.zone_code = x.zone_code
                         and vt.section_code = x.section_code
                         and vt.some_id = x.urna_num
-                        and julianday(vt.event_timestamp) < x.tempo_final) as data_inicio
+                        and vt.event_timestamp < x.data_termino) as data_inicio
                 from (SELECT voto.uf,
                             voto.city_code,
                             voto.zone_code,
                             voto.section_code,
                             voto.event_system,
                             voto.some_id as urna_num,
-                            julianday(voto.event_timestamp) as tempo_final,
+                            voto.event_timestamp as data_termino,
                             voto.event_description as evento,
                             (SELECT GROUP_CONCAT(event_description) as urna_info
                                 FROM eventos urna
@@ -55,14 +55,12 @@ query_top_10_pessoas_que_mais_demoraram=f"""select y.uf,
        y.city_code,
        y.zone_code,
        y.urna,
-       (extract(day from (y.event_timestamp - y.data_inicio)) * 24 * 60 +
-         extract(hour from (y.event_timestamp - y.data_inicio)) * 60 +
-         extract(minute from (y.event_timestamp - y.data_inicio))) AS tempo_voto,
+       sys.epoch(y.tempo_final) - sys.epoch(y.data_inicio) as tempo_voto,
        y.data_inicio,
        y.event_timestamp as data_final
 from (select x.*,
              (select max(vt.event_timestamp)
-              from eventos vt
+              from events_df vt
               where vt.event_system = x.event_system
                 and vt.event_description = '{ANCORA}'
                 and vt.uf = x.uf
@@ -80,7 +78,7 @@ from (select x.*,
                    voto.event_timestamp as tempo_final,
                    voto.event_description as evento,
                    (SELECT GROUP_CONCAT(event_description) as urna_info
-                    FROM eventos urna
+                    FROM events_df urna
                     WHERE urna.event_system = 'GAP'
                       and urna.some_id = voto.some_id
                       and urna.city_code = voto.city_code
@@ -88,7 +86,7 @@ from (select x.*,
                       and urna.zone_code = voto.zone_code
                       and urna.section_code = voto.section_code) as urna,
                    voto.event_timestamp
-            FROM eventos voto
+            FROM events_df voto
             WHERE voto.event_system = 'VOTA'
               and voto.event_description = '{FIM_VOTO}'
             order by voto.uf, voto.city_code, voto.zone_code, voto.section_code, voto.some_id, voto.event_timestamp) x) Y
@@ -106,7 +104,7 @@ from (select y.uf,
             y.urna_num,
             y.urna,
             y.evento,
-            (y.tempo_final - julianday(y.data_inicio)) * 1440 as tempo_voto,
+            sys.epoch(y.data_termino) - sys.epoch(y.data_inicio) as tempo_voto,
             y.data_inicio,
             y.event_timestamp as data_final
         from (select x.*,
@@ -119,14 +117,14 @@ from (select y.uf,
                         and vt.zone_code = x.zone_code
                         and vt.section_code = x.section_code
                         and vt.some_id = x.urna_num
-                        and julianday(vt.event_timestamp) < x.tempo_final) as data_inicio
+                        and vt.event_timestamp < x.data_termino) as data_inicio
                 from (SELECT voto.uf,
                             voto.city_code,
                             voto.zone_code,
                             voto.section_code,
                             voto.event_system,
                             voto.some_id as urna_num,
-                            julianday(voto.event_timestamp) as tempo_final,
+                            voto.event_timestamp as data_termino,
                             voto.event_description as evento,
                             (SELECT GROUP_CONCAT(event_description) as urna_info
                                 FROM eventos urna
@@ -156,7 +154,7 @@ from (select y.uf,
             y.urna_num,
             y.urna,
             y.evento,
-            (y.tempo_final - julianday(y.data_inicio)) * 1440 as tempo_voto,
+            sys.epoch(y.data_termino) - sys.epoch(y.data_inicio) as tempo_voto,
             y.data_inicio,
             y.event_timestamp as data_final
         from (select x.*,
@@ -169,14 +167,14 @@ from (select y.uf,
                         and vt.zone_code = x.zone_code
                         and vt.section_code = x.section_code
                         and vt.some_id = x.urna_num
-                        and julianday(vt.event_timestamp) < x.tempo_final) as data_inicio
+                        and vt.event_timestamp < x.data_termino) as data_inicio
                 from (SELECT voto.uf,
                             voto.city_code,
                             voto.zone_code,
                             voto.section_code,
                             voto.event_system,
                             voto.some_id as urna_num,
-                            julianday(voto.event_timestamp) as tempo_final,
+                            voto.event_timestamp as data_termino,
                             voto.event_description as evento,
                             (SELECT GROUP_CONCAT(event_description) as urna_info
                                 FROM eventos urna
