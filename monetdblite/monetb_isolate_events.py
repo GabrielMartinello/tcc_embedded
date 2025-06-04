@@ -6,19 +6,20 @@ import polars as pl
 import glob
 import os
 import time
-from datetime import datetime
+from datetime import datetime, date
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from gerar_json import registrar_benchmark_carga
 from resource_monitor import ResourceMonitor
 import psutil
-from query.db_monetdb import conn 
+from query.db_monetdb import conn
+import tempfile 
 
 base_path = os.path.abspath("../data/logs")
-pattern = os.path.join(base_path, "2_*", "*_new.csv")
+pattern = os.path.join(base_path, "*_2", "*_new.csv")
 files = glob.glob(pattern)
 
 if not files:
-    raise FileNotFoundError("Nenhum arquivo CSV encontrado.")
+    raise FileNotFoundError(f"Nenhum arquivo CSV encontrado no padrão: {pattern}")
 
 ACCEPTED_DATES = [
     '2024-10-27', '2024-11-29',
@@ -47,161 +48,209 @@ FILTROS_LIKE = [
     'Solicita digital%'
 ]
 
-print("Lendo arquivos CSV...")
-process = psutil.Process(os.getpid())
-monitor = ResourceMonitor(process, interval=0.2)  # Mede a cada 200ms
-monitor.start()
-start = time.perf_counter()
-
-dfs = []
-for file in files:
-    df_temp = pl.read_csv(
-        file,
-        separator="\t",
-        encoding="utf8-lossy",
-        has_header=False
-    ).with_columns(
-        pl.lit(file).alias("filename")
-    )
-    dfs.append(df_temp)
-
-df = pl.concat(dfs)
-
-df = df.rename({
-    "column_1": "event_timestamp",
-    "column_2": "event_type",
-    "column_3": "some_id",
-    "column_4": "event_system",
-    "column_5": "event_description",
-    "column_6": "event_id"
-})
-
-df = df.with_columns([
-    pl.col("filename").str.extract(r'2_([A-Z]{2})', 1).alias("uf"),
-    pl.col("filename").str.extract(r'([^\\/]+)$', 1).alias("filename_only")
-])
-
-df = df.with_columns([
-    pl.col("event_timestamp").str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M:%S", strict=False),
-    pl.col("filename_only").str.slice(8, 5).alias("city_code"),  
-    pl.col("filename_only").str.slice(13, 4).alias("zone_code"),   
-    pl.col("filename_only").str.slice(17, 4).alias("section_code"), 
-])
-
-df = df.with_columns(
-    pl.col("event_timestamp").dt.date().alias("event_date")
-)
-
-df = df.with_columns(
-    pl.col("event_description").str.strip_chars().str.to_lowercase()
-)
-
 filtros_exact_lower = [f.lower() for f in FILTROS_EXACT]
 filtros_like_lower = [f.lower() for f in FILTROS_LIKE]
-
-print("Aplicando filtros no Polars...")
-
 accepted_dates_dt = [datetime.strptime(d, "%Y-%m-%d").date() for d in ACCEPTED_DATES]
 
-like_conditions = []
-for pattern in filtros_like_lower:
-    if pattern.startswith('%') and pattern.endswith('%'):
-        like_conditions.append(
-            pl.col("event_description").str.contains(pattern.strip('%'), literal=False)
-        )
-    elif pattern.endswith('%'):
-        like_conditions.append(
-            pl.col("event_description").str.starts_with(pattern.rstrip('%'))
-        )
-    elif pattern.startswith('%'):
-        like_conditions.append(
-            pl.col("event_description").str.ends_with(pattern.lstrip('%'))
-        )
-    else:
-        like_conditions.append(pl.col("event_description") == pattern)
+process = psutil.Process(os.getpid())
+monitor = ResourceMonitor(process, interval=0.5)
+monitor.start()
+start_time = time.perf_counter()
+total_rows_inserted = 0
 
-like_filter = pl.any_horizontal(like_conditions) if like_conditions else pl.lit(True)
-exact_filter = pl.col("event_description").is_in(filtros_exact_lower)
-date_filter = pl.col("event_date").is_in(accepted_dates_dt)
+try:
+    monetdblite.sql("DROP TABLE IF EXISTS events_df;", client=conn)
+except Exception as drop_err:
+    if "no such table" not in str(drop_err).lower():
+         print(f"Tabela nao existe: {drop_err}")
 
-df_filtered = df.filter(
-    (exact_filter | like_filter) & date_filter
-)
-
-print(f"Linhas após filtro: {df_filtered.shape[0]}")
-
-df = df.with_columns(
-    pl.col("event_timestamp").dt.strftime("%Y-%m-%d %H:%M:%S.%3f").alias("event_timestamp_str"),
-    pl.col("event_date").dt.strftime("%Y-%m-%d").alias("event_date")
-)
-
-output_csv = "./events_df.csv"
-df_filtered.write_csv(output_csv)
-# Remover cabeçalho do CSV
-with open(output_csv, 'r', encoding='utf8') as f:
-    lines = f.readlines()
-
-with open(output_csv, 'w', encoding='utf8') as f:
-    f.writelines(lines[1:])  # Remove o cabeçalho
-print(f"CSV tratado salvo em: {output_csv}")
-
-#monetdblite.sql("""
-#DROP TABLE eventos;
-#""", client=conn)
-
-monetdblite.sql("""
-CREATE TABLE eventos (
-    event_timestamp TIMESTAMP,
-    event_type STRING,
-    some_id STRING,
-    event_system STRING,
-    event_description STRING,
-    event_id STRING,
-    filename STRING,
-    uf STRING,
-    filename_only STRING,
-    city_code STRING,
-    zone_code STRING,
-    section_code STRING,
+create_table_sql = """
+CREATE TABLE events_df (
+    event_timestamp TIMESTAMP, 
+    event_type VARCHAR(255),
+    some_id VARCHAR(255),
+    event_system VARCHAR(255),
+    event_description VARCHAR(1024),
+    event_id VARCHAR(255),
+    filename VARCHAR(1024),
+    uf VARCHAR(2),
+    filename_only VARCHAR(255),
+    city_code VARCHAR(10),
+    zone_code VARCHAR(10),
+    section_code VARCHAR(10),
     event_date DATE
 );
-""", client=conn)
+"""
 
-# Carregando CSV
-csv_path = os.path.abspath('./events_df.csv')
-monetdblite.sql(f"""
-COPY INTO eventos
-FROM '{csv_path}'
-USING DELIMITERS ',', '\n', '\"' NULL AS '';
-""", client=conn)
+try:
+    monetdblite.sql(create_table_sql, client=conn)
+    print("Tabela 'events_df' criada com sucesso.")
+except Exception as e:
+    print(f"Erro ao criar tabela events_df': {e}")
+    monitor.stop()
+    monitor.join()
+    sys.exit(1)
+    
+def format_sql_literal(value):
+    """Formatar para fazer o insert"""
+    if value is None:
+        return "NULL"
+    elif isinstance(value, (int, float)):
+        return str(value)
+    elif isinstance(value, datetime):
+        return f"TIMESTAMP '{value.strftime('%Y-%m-%d %H:%M:%S.%f')}'"
+    elif isinstance(value, date):
+        return f"DATE '{value.strftime('%Y-%m-%d')}'"
+    else:
+        escaped_value = str(value).replace("'", "''") 
+        return f"'{escaped_value}'"
+    
+print(f"Processing {len(files)} files in batches...")
 
-print("CSV carregado no MonetDBLite com sucesso.")
-end = time.perf_counter()
+insert_prefix = """
+INSERT INTO events_df (
+    event_timestamp, event_type, some_id, event_system, 
+    event_description, event_id, filename, uf, filename_only, 
+    city_code, zone_code, section_code, event_date
+) VALUES 
+"""
+# Aqui da pra aumentar, só 500 tá lentasso 
+multi_value_batch_size = 50000 
+for i, file_path in enumerate(files):
+    file_start_time = time.perf_counter()
+    print(f"Processing file {i+1}/{len(files)}: {os.path.basename(file_path)}...", end=' ')
+    try:
+        # Lendo arquivo .csv
+        df_temp = pl.read_csv(
+            file_path,
+            separator="\t",
+            encoding="utf8-lossy",
+            has_header=False,
+            try_parse_dates=False
+        ).with_columns(
+            pl.lit(file_path).alias("filename")
+        )
+
+        # 2. renomenado colunas do csv
+        df_transformed = df_temp.rename({
+            "column_1": "event_timestamp_str",
+            "column_2": "event_type",
+            "column_3": "some_id",
+            "column_4": "event_system",
+            "column_5": "event_description",
+            "column_6": "event_id"
+        }).with_columns([
+            pl.col("filename").str.extract(r'2_([A-Z]{2})', 1).alias("uf"),
+            pl.col("filename").str.extract(r'([^\\/]+)$', 1).alias("filename_only")
+        ]).with_columns([
+            # Parsing do timestamp, o monet aceita um formato especifico
+            pl.col("event_timestamp_str").str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M:%S", strict=False).alias("event_timestamp"),
+            pl.col("filename_only").str.slice(8, 5).alias("city_code"),
+            pl.col("filename_only").str.slice(13, 4).alias("zone_code"),
+            pl.col("filename_only").str.slice(17, 4).alias("section_code"),
+        ]).with_columns(
+             pl.col("event_timestamp").dt.date().alias("event_date")
+        ).with_columns(
+            pl.col("event_description").str.strip_chars().str.to_lowercase()
+        ).select([
+            "event_timestamp", "event_type", "some_id", "event_system", 
+            "event_description", "event_id", "filename", "uf", "filename_only", 
+            "city_code", "zone_code", "section_code", "event_date"
+        ])
+
+        like_conditions = []
+        for pattern in filtros_like_lower:
+            if pattern.startswith('%') and pattern.endswith('%'):
+                like_conditions.append(pl.col("event_description").str.contains(pattern.strip('%'), literal=False))
+            elif pattern.endswith('%'):
+                like_conditions.append(pl.col("event_description").str.starts_with(pattern.rstrip('%')))
+            elif pattern.startswith('%'):
+                like_conditions.append(pl.col("event_description").str.ends_with(pattern.lstrip('%')))
+            else:
+                like_conditions.append(pl.col("event_description") == pattern)
+        
+        like_filter = pl.any_horizontal(like_conditions) if like_conditions else pl.lit(False)
+        exact_filter = pl.col("event_description").is_in(filtros_exact_lower)
+        date_filter = pl.col("event_date").is_in(accepted_dates_dt) 
+
+        df_filtered_chunk = df_transformed.filter(
+            (exact_filter | like_filter) & date_filter 
+        )
+
+        rows_in_chunk = df_filtered_chunk.height
+        if rows_in_chunk > 0:
+            data_tuples = df_filtered_chunk.rows()
+            
+            num_batches = (rows_in_chunk + multi_value_batch_size - 1) // multi_value_batch_size
+            
+            for batch_num in range(num_batches):
+                start_idx = batch_num * multi_value_batch_size
+                end_idx = min((batch_num + 1) * multi_value_batch_size, rows_in_chunk)
+                current_batch_tuples = data_tuples[start_idx:end_idx]
+
+                if not current_batch_tuples:
+                    continue
+
+                values_clauses = []
+                for row_tuple in current_batch_tuples:
+                    formatted_values = [format_sql_literal(val) for val in row_tuple]
+                    values_clauses.append(f"({','.join(formatted_values)})")
+                
+                multi_insert_sql = insert_prefix + ",\n".join(values_clauses) + ";"
+
+                batch_cur = None
+                try:
+                    monetdblite.sql(multi_insert_sql, client=conn)
+                except Exception as insert_err:
+                    print(f"\nError inserting for file {os.path.basename(file_path)}: {insert_err}")
+                    print(f"SQL attempted (first 1000 chars): {multi_insert_sql[:1000]}") 
+                    conn.rollback()
+                    raise 
+                
+            total_rows_inserted += rows_in_chunk
+            file_time = time.perf_counter() - file_start_time
+            print(f"Inserted {rows_in_chunk} rows ({num_batches} batches). Time: {file_time:.2f}s. Total: {total_rows_inserted}")
+        else:
+            file_time = time.perf_counter() - file_start_time
+            print(f"No rows to insert after filtering. Time: {file_time:.2f}s.")
+
+        del df_temp
+        del df_transformed
+        del df_filtered_chunk
+
+    except Exception as e:
+        print(f"\nERROR ao processar arquivo {os.path.basename(file_path)}: {e}")
+
+print("\nTodos os arquivos lidos.")
+end_time = time.perf_counter()
 monitor.stop()
 monitor.join()
 
-tempo_execucao = end - start
+tempo_execucao = end_time - start_time
+tamanho_total_bytes = sum(os.path.getsize(f) for f in files if os.path.exists(f))
+tamanho_total_mb = tamanho_total_bytes / (1024 * 1024)
 
 cpu_percent_medio = monitor.get_average_cpu()
 mem_before = monitor.mem_readings[0] if monitor.mem_readings else 0
 mem_after = monitor.mem_readings[-1] if monitor.mem_readings else 0
 mem_max = monitor.get_max_memory()
 
-tamanho_total_bytes = sum(os.path.getsize(f) for f in files)
-tamanho_total_mb = tamanho_total_bytes / (1024 * 1024)
-
-print(f"\nProcesso concluído em {tempo_execucao:.2f} segundos")
-print(f"Memória início: {mem_before:.2f} MB | final: {mem_after:.2f} MB | pico: {mem_max:.2f} MB")
-print(f"CPU percentual médio durante execução: {cpu_percent_medio:.2f}%")
-print(f"\nProcesso concluído em {end - start:.2f} segundos")
+print(f"\n--- BENCHMARK RESULTS ---")
+print(f"Total rows inserted: {total_rows_inserted}")
+print(f"Total files processed: {len(files)}")
+print(f"Total data size (CSV): {tamanho_total_mb:.2f} MB")
+print(f"Total execution time: {tempo_execucao:.2f} seconds")
+print(f"Memory usage: Start={mem_before:.2f} MB | End={mem_after:.2f} MB | Peak={mem_max:.2f} MB")
+print(f"Average CPU usage: {cpu_percent_medio:.2f}%" if cpu_percent_medio else "Average CPU usage: N/A")
 
 registrar_benchmark_carga(
     banco="MonetDBLite",
     tempo_execucao=tempo_execucao,
-    linhas=df_filtered.shape[0],
+    linhas=total_rows_inserted,
     arquivos=len(files),
     tamanho_total_mb=tamanho_total_mb,
     mem_before=mem_before,
     mem_after=mem_after,
-    cpu_percent=cpu_percent_medio
+    cpu_percent=cpu_percent_medio,
+    mem_max=mem_max
 )
