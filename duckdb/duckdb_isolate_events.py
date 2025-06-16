@@ -11,7 +11,7 @@ from gerar_json import registrar_benchmark_carga
 from resource_monitor import ResourceMonitor
 
 base_path = os.path.abspath("../data/logs") 
-pattern = os.path.join(base_path, "*_2", "*_new.csv")
+pattern = os.path.join(base_path, "2_*", "*_new.csv")
 files = glob.glob(pattern)
 
 if not files:
@@ -97,7 +97,7 @@ for i, file_path in enumerate(files):
         )
 
         df_transformed = df_temp.rename({
-            "column_1": "event_timestamp_str", 
+            "column_1": "event_timestamp", 
             "column_2": "event_type",
             "column_3": "some_id",
             "column_4": "event_system",
@@ -107,7 +107,7 @@ for i, file_path in enumerate(files):
             pl.col("filename").str.extract(r'2_([A-Z]{2})', 1).alias("uf"),
             pl.col("filename").str.extract(r'([^\\/]+)$', 1).alias("filename_only")
         ]).with_columns([
-            pl.col("event_timestamp_str").str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M:%S", strict=False).alias("event_timestamp"), 
+            pl.col("event_timestamp").str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M:%S", strict=False), 
             pl.col("filename_only").str.slice(8, 5).alias("city_code"),
             pl.col("filename_only").str.slice(13, 4).alias("zone_code"),
             pl.col("filename_only").str.slice(17, 4).alias("section_code"),
@@ -136,11 +136,14 @@ for i, file_path in enumerate(files):
             (exact_filter | like_filter) & date_filter 
         )
 
+        print(df_filtered_chunk.columns)
         print(f"Linhas após filtro: {df_filtered_chunk.shape[0]}")
         print("Conectando ao DuckDB...")
         rows_in_chunk = df_filtered_chunk.height
         if rows_in_chunk > 0:
-            con.register("events_df", df_filtered_chunk)
+            con.register("temp_df", df_filtered_chunk)
+            con.execute("INSERT INTO events_df SELECT * FROM temp_df")
+            con.unregister("temp_df")
             total_rows_inserted += rows_in_chunk
             file_time = time.perf_counter() - file_start_time
             print(f"Linhas inseridas {rows_in_chunk}. Time: {file_time:.2f}s. Total: {total_rows_inserted}")
@@ -186,7 +189,7 @@ registrar_benchmark_carga(
     mem_before=mem_before,
     mem_after=mem_after,
     cpu_percent=cpu_percent_medio,
-    mem_max=mem_max
+    mex_max=mem_max
 )
 
 try:

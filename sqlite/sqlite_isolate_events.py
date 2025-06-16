@@ -1,4 +1,3 @@
-import monetdblite
 import time
 import os
 import sys
@@ -12,10 +11,9 @@ from gerar_json import registrar_benchmark_carga
 from resource_monitor import ResourceMonitor
 import psutil
 from query.db_sqlite import get_conn
-import tempfile 
 
 base_path = os.path.abspath("../data/logs")
-pattern = os.path.join(base_path, "*_2", "*_new.csv")
+pattern = os.path.join(base_path, "2_*", "*_new.csv")
 files = glob.glob(pattern)
 
 conn = get_conn()
@@ -85,8 +83,18 @@ CREATE TABLE events_df (
 );
 """
 
+create_indices="""
+CREATE INDEX event_index ON events_df (event_description);
+CREATE INDEX event_time_stamp_index ON events_df (event_timestamp);
+CREATE INDEX some_id_index ON events_df (some_id);
+CREATE INDEX event_system_index ON events_df (event_system);
+create index eventos on events_df (event_system, some_id, city_code, uf, zone_code, section_code );
+"""
+
 try:
     cursor.execute(create_table_sql)
+    conn.commit()
+    cursor.executescript(create_indices)
     conn.commit()
     print("Tabela 'events_df' criada com sucesso.")
 except Exception as e:
@@ -94,6 +102,8 @@ except Exception as e:
     monitor.stop()
     monitor.join()
     sys.exit(1)
+
+
     
 def format_sql_literal(value):
     """Formats a Python value into an SQL literal string for SQLite."""
@@ -227,5 +237,5 @@ registrar_benchmark_carga(
     mem_before=mem_before,
     mem_after=mem_after,
     cpu_percent=cpu_percent_medio,
-    mem_max=mem_max
+    mex_max=mem_max
 )

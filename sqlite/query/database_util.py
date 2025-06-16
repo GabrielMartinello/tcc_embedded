@@ -3,30 +3,52 @@ import psutil
 import os
 from .db_sqlite import get_conn
 from tabulate import tabulate
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+from gerar_json import salvar_resultados_consultas
+from resource_monitor import ResourceMonitor
 
 con = get_conn()
 cursor = con.cursor()
 process = psutil.Process(os.getpid())
+banco_nome = "SQLite"
 
-def imprimir_resultados(result, colunas,end, start, mem_before, mem_after, cpu):
-    print(tabulate(result, headers=colunas, tablefmt="psql"))
+def executar_consulta(query, descricao=""):
+    process = psutil.Process(os.getpid())
+    monitor = ResourceMonitor(process, interval=0.2)  # Mede a cada 200ms
+    monitor.start()
+    tic = time.perf_counter()
+
+    result = con.execute(query).fetchall()
+    print(result)
     print("\n")
-    print(f"Tempo da query: {end - start:.4f} segundos")
-    print(f"Memória antes: {mem_before:.2f} MB")
-    print(f"Memória depois: {mem_after:.2f} MB")
-    print(f"Variação de memória: {mem_after - mem_before:.2f} MB")
-    print(f"CPU (percentual instantâneo): {cpu}%")
-    print("\n")
 
+    toc = time.perf_counter()
+    monitor.stop()
+    monitor.join()
 
-def executar_consulta(query):
-    mem_before = process.memory_info().rss / (1024 ** 2)
-    tic=time.time()
-    result = cursor.execute(query).fetchall()
-    toc=time.time()
-    mem_after = process.memory_info().rss / (1024 ** 2)
-    cpu_after = process.cpu_percent(interval=None)
+    cpu_percent_medio = monitor.get_average_cpu()
+    mem_before = monitor.mem_readings[0] if monitor.mem_readings else 0
+    mem_after = monitor.mem_readings[-1] if monitor.mem_readings else 0
+    mem_max = monitor.get_max_memory()
 
-    colunas = [desc[0] for desc in cursor.description]
+    tempo_exec = round(toc - tic, 4)
 
-    imprimir_resultados(result, colunas,toc, tic, mem_before, mem_after, cpu_after)
+    dados_consulta = {
+        "descricao": descricao,
+        "tempo_execucao_s": tempo_exec,
+        "memoria_inicial_mb": round(mem_before, 2),
+        "memoria_final_mb": round(mem_after, 2),
+        "memoria_max_utilizada": mem_max,
+        "cpu_percent": cpu_percent_medio
+    }
+
+    salvar_resultados_consultas(banco_nome, dados_consulta)
+    print(f"\n=== {banco_nome} | {descricao} ===")
+    print(f"Tempo de execução: {tempo_exec}s")
+    print(f"Memória antes: {round(mem_before,2)} MB")
+    print(f"Memória depois: {round(mem_after,2)} MB")
+    print(f"Memória máxima utilizada: {mem_max} MB")
+    print(f"Uso médio de CPU (pós consulta): {cpu_percent_medio}%\n")
+
+    return result
