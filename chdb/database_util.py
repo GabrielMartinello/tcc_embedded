@@ -1,31 +1,27 @@
 import time
 import psutil
-import os
-from .db_sqlite import get_conn
-from tabulate import tabulate
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+import os
+import chdb
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from gerar_json import salvar_resultados_consultas
 from resource_monitor import ResourceMonitor
 
-con = get_conn()
-cursor = con.cursor()
+con = chdb.connect()
+con.query("SET allow_experimental_join_condition = 1;")
 process = psutil.Process(os.getpid())
-banco_nome = "SQLite"
+banco_nome = "CHDB"
 
 def executar_consulta(query, descricao=""):
     process = psutil.Process(os.getpid())
-    monitor = ResourceMonitor(process, interval=0.2)  # Mede a cada 200ms
+    monitor = ResourceMonitor(process, interval=0.2)
     monitor.start()
+
     tic = time.perf_counter()
-
-    result = con.execute(query)
-    rows = result.fetchall()
-
-    col_names = [description[0] for description in result.description]
-    print(tabulate(rows, headers=col_names, tablefmt="pretty"))
-    print("\n")
-
+    result = con.query(query)
+    
+    print(result)
     toc = time.perf_counter()
     monitor.stop()
     monitor.join()
@@ -47,6 +43,7 @@ def executar_consulta(query, descricao=""):
     }
 
     salvar_resultados_consultas(banco_nome, dados_consulta)
+
     print(f"\n=== {banco_nome} | {descricao} ===")
     print(f"Tempo de execução: {tempo_exec}s")
     print(f"Memória antes: {round(mem_before,2)} MB")

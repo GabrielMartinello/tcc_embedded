@@ -36,7 +36,7 @@ def salvar_resultados_consultas(banco_nome, dados_consulta):
     with open(RESULTS_FILE, "w") as file:
         json.dump(resultados, file, indent=4)
 
-def registrar_benchmark_carga(banco, tempo_execucao, linhas, arquivos, tamanho_total_mb, mem_before, mem_after, cpu_percent):
+def registrar_benchmark_carga(banco, tempo_execucao, linhas, arquivos, tamanho_total_mb, mem_before, mem_after, cpu_percent, mex_max):
     json_file = "../benchmark_cargas.json"
     data = {}
 
@@ -57,7 +57,8 @@ def registrar_benchmark_carga(banco, tempo_execucao, linhas, arquivos, tamanho_t
         "memoria_inicio_mb": round(mem_before, 2),
         "memoria_final_mb": round(mem_after, 2),
         "memoria_variacao_mb": round(mem_after - mem_before, 2),
-        "cpu_percent_medio": cpu_percent
+        "cpu_percent_medio": cpu_percent,
+        "memoria_maxima_utilizada": mex_max
     })
 
     with open(json_file, 'w') as f:
