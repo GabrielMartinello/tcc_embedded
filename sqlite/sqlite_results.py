@@ -27,14 +27,9 @@ print(" "*40, f"Uso do Disco: {disk.percent}%")
 print("="*80)
 print("\n"*3)
 
-print("Quantidade total de linhas:.....")
-executar_consulta(queries.query_count_todos_registros)
-
-print("Registros do sistema:.....")
-executar_consulta(queries.query_qtde_registros_eventos_sistema)
-
-print("Quantidade de Erros Alerta e Infos:.....")
-executar_consulta(queries.query_qtde_erro_alerta_info)
+#executar_consulta(queries.query_count_todos_registros, "Quantidade total de linhas")
+#executar_consulta(queries.query_qtde_registros_eventos_sistema, "Todos os tipos de registros")
+#executar_consulta(queries.query_qtde_erro_alerta_info, "Contagem de erros, alertas e infos")
 
 print("\n"*2)
 
@@ -42,14 +37,7 @@ print( "="*40, "EXECUTANDO CONSULTAS DE AGREGAÇÃO", "="*40)
 
 print("\n")
 
-print("Top 10 pessoas que mais demoraram para votar:.....")
-executar_consulta(queries.query_top_10_pessoas_que_mais_demoraram)
-
-print("Tempo medio de voto por zonas:.....")
-executar_consulta(queries.query_tempo_medio_voto_por_zona)
-
-print("Tempo medio de voto por estados:.....")
-executar_consulta(queries.query_tempo_medio_voto_uf)
-
-print("Tempo médio de voto por cidades:.....")
-executar_consulta(queries.query_tempo_medio_voto_cidade)
+#executar_consulta(queries.query_top_10_pessoas_que_mais_demoraram, "Top 10 pessoas que mais demoraram para votar")
+executar_consulta(queries.query_tempo_medio_voto_por_zona, "Tempo medio de voto por zonas")
+executar_consulta(queries.query_tempo_medio_voto_uf, "Tempo medio de voto por estados")
+executar_consulta(queries.query_tempo_medio_voto_cidade, "Tempo medio de voto por cidades")

@@ -19,7 +19,7 @@ def executar_consulta(query, descricao=""):
     tic = time.perf_counter()
 
     result = monetdblite.sql(query, conn)
-    
+    print(result)
     toc = time.perf_counter()
     monitor.stop()
     monitor.join()
